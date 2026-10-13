@@ -325,37 +325,51 @@ fn brush_rail(app: &mut PhotocraftApp, ctx: &egui::Context, canvas: Rect, t: &To
     if !app.ui.tool.is_brushlike() {
         return;
     }
-    let w = 44.0;
+    // As wide as the longer label in the current language ("Opacidade"), never splitting it.
+    let (size_label, opacity_label) = (tl!("Size"), tl!("Opacity"));
+    let font = egui::FontId::proportional(11.0);
+    let widest = [size_label, opacity_label]
+        .map(|l| ctx.fonts_mut(|f| f.layout_no_wrap(l.to_owned(), font.clone(), t.text_dim).size().x))
+        .into_iter()
+        .fold(0.0, f32::max);
+    let w = (widest + 16.0).max(44.0);
     let h = 2.0 * 120.0 + 70.0;
     let x = if crate::direction::is_rtl() { canvas.left() + 8.0 } else { canvas.right() - 8.0 - w };
     let before = app.session.tools.brush.clone();
     let mut brush = before.clone();
+    // A slim vertical slider in the middle of the rail.
+    let slider = |ui: &mut egui::Ui, s: egui::Slider| {
+        let (rect, _) = ui.allocate_exact_size(vec2(w, 120.0), Sense::hover());
+        ui.put(egui::Rect::from_center_size(rect.center(), vec2(28.0, 120.0)), s)
+    };
     egui::Area::new(egui::Id::new("mobile-brush-rail")).order(egui::Order::Middle).fixed_pos(pos2(x, canvas.center().y - h / 2.0)).show(ctx, |ui| {
-        egui::Frame::NONE
-            .fill(t.chrome.gamma_multiply(0.92))
-            .stroke(Stroke::new(1.0, t.field_border))
-            .corner_radius(w / 2.0)
-            .inner_margin(egui::Margin::symmetric(0, 10))
-            .show(ui, |ui| {
+        // Opaque: the document doesn't show through it.
+        egui::Frame::NONE.fill(t.chrome).stroke(Stroke::new(1.0, t.field_border)).corner_radius(w / 2.0).inner_margin(egui::Margin::symmetric(0, 10)).show(
+            ui,
+            |ui| {
                 ui.set_width(w);
                 ui.vertical_centered(|ui| {
                     ui.spacing_mut().slider_width = 120.0;
-                    ui.label(RichText::new(tl!("Size")).size(11.0).color(t.text_dim));
+                    // A slim slider centred in the rail (the touch style's 44 dp fields would make
+                    // it as wide as the rail, its track at the left).
+                    ui.spacing_mut().interact_size.y = 28.0;
+                    ui.add(egui::Label::new(RichText::new(size_label).size(11.0).color(t.text_dim)).wrap_mode(egui::TextWrapMode::Extend));
                     // Only a moved slider writes: the brush may hold values outside the rail's range.
                     let max = photocraft_paint::MAX_BRUSH_SIZE.min(1000.0);
                     let mut size = brush.size;
-                    if ui.add(egui::Slider::new(&mut size, 1.0..=max).vertical().logarithmic(true).show_value(false)).changed() {
+                    if slider(ui, egui::Slider::new(&mut size, 1.0..=max).vertical().logarithmic(true).show_value(false)).changed() {
                         brush.size = size;
                     }
                     ui.add_space(6.0);
                     // The brush keeps opacity as 0..1; the rail shows percent, as the options bar.
                     let mut percent = brush.opacity * 100.0;
-                    if ui.add(egui::Slider::new(&mut percent, 1.0..=100.0).vertical().show_value(false)).changed() {
+                    if slider(ui, egui::Slider::new(&mut percent, 1.0..=100.0).vertical().show_value(false)).changed() {
                         brush.opacity = percent / 100.0;
                     }
-                    ui.label(RichText::new(tl!("Opacity")).size(11.0).color(t.text_dim));
+                    ui.add(egui::Label::new(RichText::new(opacity_label).size(11.0).color(t.text_dim)).wrap_mode(egui::TextWrapMode::Extend));
                 });
-            });
+            },
+        );
     });
     if brush != before {
         crate::brush_panel::commit_gesture(app, ctx, &before, &brush);

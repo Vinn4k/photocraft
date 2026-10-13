@@ -76,7 +76,7 @@ impl eframe::App for Shell {
         let safe = ctx.content_rect();
         ui.painter().rect_filled(ctx.viewport_rect(), 0.0, photocraft_ui_egui::theme::Tokens::get(&ctx).chrome);
         ui.scope_builder(egui::UiBuilder::new().max_rect(safe), |ui| self.app.ui(ui, frame));
-        let access = files::Access { granted: system::has_file_access, request: system::request_file_access };
+        let access = files::Access { granted: system::has_file_access, request: ask_file_access };
         if let Some(dir) = files::show(&self.queue, &ctx, access) {
             *self.last_dir.borrow_mut() = dir;
         }
@@ -87,7 +87,8 @@ impl Shell {
     /// NativeActivity draws under the status bar, the navigation bar and the camera cutout (and
     /// the keyboard covers the bottom): give egui those as its safe area, so panels stay inside.
     /// The system's insets (JNI) are read again when the window changes size and twice a
-    /// second (the keyboard opens without one); the content rect is the fallback.
+    /// second (the keyboard opens without one). The content rect is only a fallback: it starts
+    /// below the theme's (invisible) action bar too, which left a second bar's height empty.
     fn keep_clear_of_system_bars(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
         let ppp = raw.viewports.get(&raw.viewport_id).and_then(|v| v.native_pixels_per_point).unwrap_or_else(|| ctx.pixels_per_point()) * ctx.zoom_factor();
         let Some(screen) = raw.screen_rect else { return };
@@ -97,11 +98,8 @@ impl Shell {
         if stale {
             let cr = self.android.content_rect();
             let from_rect = if cr.right > cr.left && cr.bottom > cr.top { [cr.left, cr.top, size[0] - cr.right, size[1] - cr.bottom] } else { [0; 4] };
-            let from_system = system::insets().unwrap_or_else(|e| {
-                log::warn!("photocraft: window insets: {e}");
-                [0; 4]
-            });
-            let insets: Insets = std::array::from_fn(|i| from_rect.get(i).copied().unwrap_or(0).max(from_system.get(i).copied().unwrap_or(0)).max(0));
+            let from_system = system::insets().inspect_err(|e| log::warn!("photocraft: window insets: {e}")).ok();
+            let insets: Insets = from_system.unwrap_or(from_rect).map(|v| v.max(0));
             self.insets = Some((size, now, insets));
         }
         if let Some((_, _, [left, top, right, bottom])) = self.insets {
@@ -109,6 +107,17 @@ impl Shell {
             raw.safe_area_insets = Some(egui::SafeAreaInsets(egui::epaint::MarginF32 { left: pt(left), right: pt(right), top: pt(top), bottom: pt(bottom) }));
         }
     }
+}
+
+/// Ask for file access and say what to do in what opened.
+fn ask_file_access() -> Result<String, String> {
+    let t = photocraft_ui_egui::i18n::t;
+    Ok(match system::request_file_access()? {
+        system::Asked::AllFilesSwitch => t("Turn on \"Allow access to manage all files\", then come back to PhotoCraft.").to_string(),
+        system::Asked::AllFilesList => t("Find PhotoCraft in the list, turn on its access, then come back.").to_string(),
+        system::Asked::AppInfo => t(files::MANUAL).to_string(),
+        system::Asked::Permission => t("Allow PhotoCraft to access photos and files when Android asks.").to_string(),
+    })
 }
 
 fn services(queue: files::Queue, last_dir: Rc<RefCell<PathBuf>>, prefs: Option<PathBuf>) -> Services {

@@ -417,10 +417,14 @@ Android 9+ (API 28) on arm64 with Vulkan.
 - **Files:** NativeActivity can't receive the system picker's answer, so Open, Save As and Export
   use PhotoCraft's own browser (`apps/photocraft-android/src/files.rs`) over shared storage. It
   needs Android's "All files access" (`MANAGE_EXTERNAL_STORAGE`; the storage permissions before
-  Android 11): the browser's **Allow Access** opens the switch in Settings. Its tests run on the
+  Android 11): the browser's **Allow Access** opens the switch in Settings (else the list of apps,
+  else the photos permission; by hand: Settings › Apps › Special app access › All files access).
+  It is a special access, so the app's ordinary Permissions page doesn't list it; it lists the
+  photos permission (`READ_MEDIA_IMAGES`, Android 13+), which is enough to open images. Its tests run on the
   build machine: `cargo test -p photocraft-android` (`PHOTOCRAFT_SNAPSHOT_DIR=…` writes a PNG).
 - **System bars:** the shell reads the window insets (status and navigation bars, cutout,
-  keyboard) through JNI and lays the app out inside them (egui's safe area).
+  keyboard) through JNI and lays the app out inside them (egui's safe area). The theme has no
+  action bar: NativeActivity never draws it, but the default theme reserves its height.
 - **Keyboard:** NativeActivity offers the keyboard no text field type, so some keyboards open on
   their symbols page. A proper text connection needs GameActivity (a Gradle build); not done yet.
 

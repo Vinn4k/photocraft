@@ -24,7 +24,7 @@ fn access() -> Access {
         granted: || GRANTED.load(Ordering::Relaxed),
         request: || {
             ASKED.store(true, Ordering::Relaxed);
-            Ok(())
+            Ok("Settings opened".into())
         },
     }
 }
@@ -149,6 +149,7 @@ fn without_access_it_asks_for_it_and_back_cancels() {
     h.get_by_label("Allow Access").click();
     h.run_steps(2);
     assert!(ASKED.load(Ordering::Relaxed), "asked Android for access");
+    assert!(h.query_by_label("Settings opened").is_some(), "says what happened");
     h.key_press(egui::Key::BrowserBack);
     h.run_steps(4);
     assert!(h.state().queue.borrow().is_none(), "Back closes it");

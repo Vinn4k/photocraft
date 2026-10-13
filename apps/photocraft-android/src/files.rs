@@ -27,6 +27,9 @@ const OPEN_EXTS: &[&str] = &[
 /// The folders offered as shortcuts, under [`STORAGE`].
 const PLACES: &[(&str, &str)] = &[("Internal storage", ""), ("Pictures", "Pictures"), ("Download", "Download"), ("DCIM", "DCIM"), ("Documents", "Documents")];
 
+/// Where the switch is, when nothing opens it.
+pub const MANUAL: &str = "If nothing opens: Settings › Apps › Special app access › All files access › PhotoCraft.";
+
 /// Row and button height (dp), as the rest of the phone layout.
 const ROW: f32 = 48.0;
 
@@ -37,7 +40,8 @@ pub type Queue = Rc<RefCell<Option<Browser>>>;
 #[derive(Clone, Copy)]
 pub struct Access {
     pub granted: fn() -> bool,
-    pub request: fn() -> Result<(), String>,
+    /// Ask; `Ok` says what to do in what opened, `Err` why nothing did.
+    pub request: fn() -> Result<String, String>,
 }
 
 /// The app's file dialog service: queue the request for [`show`] to draw. One at a time, as the
@@ -60,6 +64,8 @@ pub struct Browser {
     /// The file name (Save) being typed.
     name: String,
     entries: Option<Result<Vec<Entry>, String>>,
+    /// What asking for access said.
+    notice: Option<String>,
 }
 
 struct Entry {
@@ -79,7 +85,7 @@ impl Browser {
                 (dir, p.file_name().map_or_else(|| suggested.clone(), |n| n.to_string_lossy().into_owned()))
             }
         };
-        Browser { request, reply: Some(reply), dir, name, entries: None }
+        Browser { request, reply: Some(reply), dir, name, entries: None, notice: None }
     }
 
     fn answer(&mut self, answer: Option<FileDialogAnswer>) {
@@ -151,11 +157,14 @@ pub fn show(queue: &Queue, ctx: &egui::Context, permission: Access) -> Option<Pa
                 ui.add_space(12.0);
                 ui.label(RichText::new(t("PhotoCraft needs access to your files to open and save them. Turn on \"Allow access to manage all files\" for PhotoCraft, then come back.")).color(tk.text));
                 ui.add_space(8.0);
-                if ui.add(egui::Button::new(t("Allow Access")).min_size(vec2(0.0, ROW))).clicked()
-                    && let Err(e) = (permission.request)()
-                {
-                    log::error!("photocraft: file access request: {e}");
+                if ui.add(egui::Button::new(t("Allow Access")).min_size(vec2(0.0, ROW))).clicked() {
+                    browser.notice = Some((permission.request)().unwrap_or_else(|e| {
+                        log::error!("photocraft: file access request: {e}");
+                        format!("{} ({e})", t(MANUAL))
+                    }));
                 }
+                ui.add_space(8.0);
+                ui.label(RichText::new(browser.notice.as_deref().unwrap_or(t(MANUAL))).color(tk.text_dim));
                 return;
             }
             // Shortcuts, then the folder with Up.
