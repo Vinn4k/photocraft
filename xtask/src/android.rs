@@ -59,6 +59,13 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
         }
     }
     cmd.env("ANDROID_HOME", &sdk).env_remove("ANDROID_SDK_ROOT").env("ANDROID_NDK_ROOT", &ndk).env("ANDROID_NDK_HOME", &ndk);
+    // robius-file-picker's build script compiles its Java helper with the SDK's d8: the newest
+    // build-tools read the newest JDKs' class files (34's d8 can't read JDK 21's).
+    if std::env::var_os("ANDROID_BUILD_TOOLS_VERSION").is_none()
+        && let Some(version) = newest_dir(&sdk.join("build-tools")).and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
+    {
+        cmd.env("ANDROID_BUILD_TOOLS_VERSION", version);
+    }
     eprintln!("android: {}", describe(&cmd));
     let status = cmd.status().map_err(|e| format!("cargo apk: {e}"))?;
     if !status.success() {
@@ -134,7 +141,7 @@ impl Toolchain {
         vec![
             ("Android SDK", self.sdk.is_some(), "install the command-line tools (developer.android.com/studio#command-tools) and set ANDROID_HOME".into()),
             ("SDK platform", self.platform, format!("{sdkmanager} \"platforms;android-34\"")),
-            ("SDK build-tools", self.build_tools, format!("{sdkmanager} \"build-tools;34.0.0\"")),
+            ("SDK build-tools", self.build_tools, format!("{sdkmanager} \"build-tools;35.0.0\"")),
             ("Android NDK", self.ndk.is_some(), format!("{sdkmanager} \"ndk;27.2.12479018\" (or set ANDROID_NDK_ROOT)")),
             ("JDK keytool", self.keytool, "install a JDK (17 or later), e.g. apt install openjdk-17-jdk-headless".into()),
             ("cargo-apk", self.cargo_apk, "cargo install cargo-apk --locked".into()),

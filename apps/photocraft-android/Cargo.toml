@@ -42,6 +42,11 @@ android_logger = "0.15"
 # calls are safe.
 robius-android-env = "=0.2.0"
 jni = "0.21"
+# Android's photo picker and file picker for File › Open. NativeActivity can't receive a picker's
+# answer; this crate's small Java helper (compiled by its build script with javac and d8, so the
+# build needs a JDK and the SDK's build-tools) receives it and calls back into Rust. Same
+# project and jni as robius-android-env; pinned exactly: review the diff before bumping.
+robius-file-picker = "=0.3.1"
 
 # The file browser's tests (src/files_tests.rs) drive it on the build machine.
 [dev-dependencies]

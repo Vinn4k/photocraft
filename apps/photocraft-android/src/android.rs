@@ -1,11 +1,12 @@
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use photocraft_codecs::{ChannelLayout, EncodeOptions, Image};
 use photocraft_doc::Document;
 use photocraft_ui_egui::theme::ThemeKind;
-use photocraft_ui_egui::{PhotocraftApp, Services};
+use photocraft_ui_egui::{FileDialogAnswer, FileDialogReply, PhotocraftApp, Services};
 
 use crate::files;
 use crate::system::{self, Insets};
@@ -76,7 +77,7 @@ impl eframe::App for Shell {
         let safe = ctx.content_rect();
         ui.painter().rect_filled(ctx.viewport_rect(), 0.0, photocraft_ui_egui::theme::Tokens::get(&ctx).chrome);
         ui.scope_builder(egui::UiBuilder::new().max_rect(safe), |ui| self.app.ui(ui, frame));
-        let access = files::Access { granted: system::has_file_access, request: ask_file_access };
+        let access = files::Access { granted: system::has_file_access, request: ask_file_access, pick: Some(pick_with_android) };
         if let Some(dir) = files::show(&self.queue, &ctx, access) {
             *self.last_dir.borrow_mut() = dir;
         }
@@ -107,6 +108,56 @@ impl Shell {
             raw.safe_area_insets = Some(egui::SafeAreaInsets(egui::epaint::MarginF32 { left: pt(left), right: pt(right), top: pt(top), bottom: pt(bottom) }));
         }
     }
+}
+
+/// File › Open through Android's photo picker or its file picker (robius-file-picker: its small
+/// Java helper receives the picker's answer, which a NativeActivity can't). The picked file is
+/// read on the picker's thread and handed to the app by name and contents.
+fn pick_with_android(picker: files::Picker, reply: FileDialogReply) -> Result<(), files::PickFailed> {
+    let slot = Arc::new(Mutex::new(Some(reply)));
+    let answer_slot = slot.clone();
+    let done = move |result: robius_file_picker::Result<Option<robius_file_picker::PickedFile>>| {
+        let answer = match result {
+            Ok(None) => None,
+            Ok(Some(file)) => Some(match file.read_bytes() {
+                Ok(bytes) => FileDialogAnswer::Contents(picked_name(&file), bytes),
+                Err(e) => FileDialogAnswer::Unavailable(format!("Couldn't read the picked file: {e}")),
+            }),
+            Err(e) => Some(FileDialogAnswer::Unavailable(e.to_string())),
+        };
+        if let Some(reply) = answer_slot.lock().unwrap_or_else(PoisonError::into_inner).take() {
+            reply.send(answer);
+        }
+    };
+    let dialog = robius_file_picker::FileDialog::new();
+    let shown = match picker {
+        files::Picker::Gallery => dialog.pick_image(done),
+        files::Picker::Files => dialog.pick_file(done),
+    };
+    shown.map_err(|e| (e.to_string(), slot.lock().unwrap_or_else(PoisonError::into_inner).take()))
+}
+
+/// The picked file's name with an extension the importer knows (a gallery may name a photo
+/// without one): from its MIME type when missing.
+fn picked_name(file: &robius_file_picker::PickedFile) -> String {
+    let name = file.file_name().or(file.display_name()).unwrap_or("image").to_string();
+    if Path::new(&name).extension().is_some() {
+        return name;
+    }
+    let ext = match file.mime_type().unwrap_or_default() {
+        "image/jpeg" => "jpg",
+        "image/png" => "png",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        "image/heic" | "image/heif" => "heic",
+        "image/tiff" => "tif",
+        "image/bmp" => "bmp",
+        "image/vnd.adobe.photoshop" => "psd",
+        "image/svg+xml" => "svg",
+        "image/x-adobe-dng" => "dng",
+        _ => return name,
+    };
+    format!("{name}.{ext}")
 }
 
 /// Ask for file access and say what to do in what opened.
