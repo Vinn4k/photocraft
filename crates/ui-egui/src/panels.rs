@@ -49,6 +49,36 @@ pub(crate) fn tool_slots() -> impl Iterator<Item = &'static [Tool]> {
     TOOL_SECTIONS.iter().flat_map(|section| section.iter().copied())
 }
 
+/// The toolbar group `tool` belongs to.
+pub(crate) fn slot_of(tool: Tool) -> Option<&'static [Tool]> {
+    tool_slots().find(|slot| slot.contains(&tool))
+}
+
+/// A tap on `anchor` lists the current tool's group, to switch within it, and Reset Tool.
+fn tool_group_popup(app: &mut PhotocraftApp, anchor: &egui::Response) {
+    let Some(slot) = slot_of(app.ui.tool) else { return };
+    let mut pick = None;
+    let mut reset = false;
+    egui::Popup::menu(anchor).show(|ui| {
+        crate::mobile::touch_menu_style(ui);
+        for &item in slot {
+            if ui.add(egui::Button::selectable(item == app.ui.tool, tl!(item.label())).min_size(vec2(220.0, 44.0))).clicked() {
+                pick = Some(item);
+            }
+        }
+        ui.separator();
+        if ui.add(egui::Button::new(tl!("Reset Tool")).min_size(vec2(220.0, 44.0))).clicked() {
+            reset = true;
+        }
+    });
+    if let Some(tool) = pick {
+        app.ui.tool = tool;
+    }
+    if reset && let Err(e) = crate::menus::invoke(app, &anchor.ctx, "tool.reset", json!({})) {
+        app.ui.status = e;
+    }
+}
+
 /// The toolbar group whose first tool is `first`.
 pub(crate) fn tool_slot(first: Tool) -> Option<&'static [Tool]> {
     tool_slots().find(|slot| slot.first() == Some(&first))
@@ -945,6 +975,11 @@ pub(crate) fn options_bar_contents(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     && let Err(e) = crate::menus::invoke(app, ui.ctx(), id, json!({}))
                 {
                     app.ui.status = e;
+                }
+                // On a phone, a tap on the tool (and its chevron) lists its group: there is no
+                // right click there, and the chevron says it opens.
+                if crate::mobile::mode(app, ui.ctx()) == crate::mobile::LayoutMode::Phone {
+                    tool_group_popup(app, &tool_icon);
                 }
                 if t.pro {
                     let (r, _) = ui.allocate_exact_size(vec2(10.0, 20.0), Sense::hover());

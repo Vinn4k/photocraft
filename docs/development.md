@@ -412,10 +412,17 @@ as `photocraft-android-apk`.
 
 The APK is signed with the debug key (`~/.android/debug.keystore`, created on first use) unless
 `CARGO_APK_RELEASE_KEYSTORE` and `CARGO_APK_RELEASE_KEYSTORE_PASSWORD` name another key. It needs
-Android 9+ (API 28) on arm64 with Vulkan. Until the system file picker (phase 5 of
-`docs/android-mobile.md`), Save, Save As and Export write to
-`Android/data/ai.storyteller.photocraft/files/`, and File › Open says opening files is not
-available yet.
+Android 9+ (API 28) on arm64 with Vulkan.
+
+- **Files:** NativeActivity can't receive the system picker's answer, so Open, Save As and Export
+  use PhotoCraft's own browser (`apps/photocraft-android/src/files.rs`) over shared storage. It
+  needs Android's "All files access" (`MANAGE_EXTERNAL_STORAGE`; the storage permissions before
+  Android 11): the browser's **Allow Access** opens the switch in Settings. Its tests run on the
+  build machine: `cargo test -p photocraft-android` (`PHOTOCRAFT_SNAPSHOT_DIR=…` writes a PNG).
+- **System bars:** the shell reads the window insets (status and navigation bars, cutout,
+  keyboard) through JNI and lays the app out inside them (egui's safe area).
+- **Keyboard:** NativeActivity offers the keyboard no text field type, so some keyboards open on
+  their symbols page. A proper text connection needs GameActivity (a Gradle build); not done yet.
 
 ## Indexed Color timings
 

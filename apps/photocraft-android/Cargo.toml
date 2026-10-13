@@ -22,19 +22,36 @@ todo = "warn"
 name = "photocraft_android"
 crate-type = ["cdylib", "rlib"]
 
+[dependencies]
+photocraft-ui-egui = { workspace = true }
+egui = { workspace = true }
+log = { workspace = true }
+
 [target.'cfg(target_os = "android")'.dependencies]
 photocraft-engine = { workspace = true }
 photocraft-io = { workspace = true }
 photocraft-codecs = { workspace = true }
 photocraft-doc = { workspace = true }
-photocraft-ui-egui = { workspace = true }
 eframe = { workspace = true, features = ["wgpu", "android-native-activity"] }
-egui = { workspace = true }
-log = { workspace = true }
 # AndroidApp for eframe's NativeOptions (eframe doesn't re-export winit). Already in Cargo.lock;
 # pinned exactly to eframe's version.
 winit = { version = "=0.30.13", default-features = false, features = ["android-native-activity"] }
 android_logger = "0.15"
+# JNI to ask Android for the window insets and for file access (system.rs): robius-android-env
+# hands over the activity android-activity registers (ndk-context) behind a safe API; jni's own
+# calls are safe.
+robius-android-env = "=0.2.0"
+jni = "0.21"
+
+# The file browser's tests (src/files_tests.rs) drive it on the build machine.
+[dev-dependencies]
+photocraft-engine = { workspace = true }
+photocraft-io = { workspace = true }
+photocraft-codecs = { workspace = true }
+photocraft-doc = { workspace = true }
+serde_json = { workspace = true }
+eframe = { workspace = true }
+egui_kittest = { workspace = true, features = ["eframe", "wgpu"] }
 
 # cargo-apk's settings. The package id matches the desktop app's (`ai.storyteller.photocraft`);
 # test builds are signed with the debug key cargo-apk creates (or the one in `[...release]`).
@@ -59,6 +76,19 @@ config_changes = "orientation|screenSize|screenLayout|keyboardHidden|keyboard|sm
 launch_mode = "singleTask"
 orientation = "unspecified"
 resizeable_activity = true
+
+# Files: "All files access" on Android 11+ (PhotoCraft opens and saves PSDs and other
+# non-media files anywhere), the storage permissions before.
+[[package.metadata.android.uses_permission]]
+name = "android.permission.MANAGE_EXTERNAL_STORAGE"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.READ_EXTERNAL_STORAGE"
+max_sdk_version = 32
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.WRITE_EXTERNAL_STORAGE"
+max_sdk_version = 29
 
 [[package.metadata.android.uses_feature]]
 name = "android.hardware.vulkan.level"

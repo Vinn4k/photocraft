@@ -41,8 +41,11 @@ nada abaixo de `ui-egui` depende de egui/eframe/winit, `unsafe` só em crate iso
 2. **Build Android mínimo** (13/10/2026): `apps/photocraft-android` (cdylib + `android-activity`,
    NativeActivity, wgpu/Vulkan), empacotado com cargo-apk por `cargo xtask android` (`--run`
    instala e abre via adb) e pelo workflow *Android APK* (artefato `photocraft-android-apk`).
-   Instruções em `docs/development.md` › Android build. Salvar/Exportar gravam em
-   `Android/data/ai.storyteller.photocraft/files/`; Abrir aguarda o seletor do sistema (fase 5).
+   Instruções em `docs/development.md` › Android build. Primeiro teste em aparelho (13/10): o app
+   ficava sob a barra de status (corrigido: área segura pelos insets da janela), Abrir/Salvar não
+   funcionavam (corrigido: navegador de arquivos próprio com "Acesso a todos os arquivos"), o
+   triângulo da ferramenta na barra de opções não abria nada (corrigido: abre o grupo) e o teclado
+   abre na página de símbolos (pendente: exige GameActivity).
 3. **Layout adaptativo em `ui-egui`:** modo de layout escolhido pelo tamanho da tela
    (desktop / tablet / celular), sem quebrar o desktop.
 4. **Entrada por toque e S Pen:** gestos, separação caneta × dedo, pressão/inclinação da S Pen via

@@ -546,3 +546,86 @@ fn export_sheet_holds_export_as_fields_while_open() {
     h.run_steps(4);
     assert!(h.state().ui.mobile.export.is_empty(), "dropped when the sheet closes");
 }
+
+/// A finger on the screen as egui-winit reports it on Android: a touch, plus a mouse emulated
+/// from it (move and press; on lifting, release and the pointer gone).
+fn finger(h: &mut egui_kittest::Harness<'static, PhotocraftApp>, pos: egui::Pos2, phase: egui::TouchPhase) {
+    let touch = egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(0), phase, pos, force: None };
+    let ev = &mut h.input_mut().events;
+    ev.push(touch);
+    let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    match phase {
+        egui::TouchPhase::Start => ev.extend([egui::Event::PointerMoved(pos), button(true)]),
+        egui::TouchPhase::End => ev.extend([button(false), egui::Event::PointerGone]),
+        _ => {}
+    }
+}
+
+fn slot_flyout_open(h: &egui_kittest::Harness<'static, PhotocraftApp>) -> bool {
+    h.query_by_label("Pencil Tool").is_some()
+}
+
+#[test]
+fn a_finger_held_on_a_tool_opens_its_group() {
+    let mut h = editor_harness(PORTRAIT);
+    h.state_mut().ui.tool = crate::state::Tool::Move;
+    h.run_steps(2);
+    let brush = h.get_by_label("Brush Tool").rect().center();
+    finger(&mut h, brush, egui::TouchPhase::Start);
+    // Past egui's 0.8 s long press (the harness steps 1/60 s).
+    h.run_steps(60);
+    assert!(slot_flyout_open(&h), "the group lists Pencil");
+    finger(&mut h, brush, egui::TouchPhase::End);
+    h.run_steps(4);
+    assert!(slot_flyout_open(&h), "lifting the finger keeps the list open");
+    h.get_by_label("Pencil Tool").click();
+    h.run_steps(4);
+    assert_eq!(h.state().ui.tool, crate::state::Tool::Pencil);
+}
+
+#[test]
+fn tapping_the_tool_in_use_opens_its_group() {
+    let mut h = editor_harness(PORTRAIT);
+    h.state_mut().ui.tool = crate::state::Tool::Move;
+    h.run_steps(2);
+    let brush = h.get_by_label("Brush Tool").rect().center();
+    for _ in 0..2 {
+        finger(&mut h, brush, egui::TouchPhase::Start);
+        h.run_steps(2);
+        finger(&mut h, brush, egui::TouchPhase::End);
+        h.run_steps(30);
+    }
+    assert_eq!(h.state().ui.tool, crate::state::Tool::Brush, "the first tap picks it");
+    assert!(slot_flyout_open(&h), "the second opens the group");
+}
+
+fn finger_tap(h: &mut egui_kittest::Harness<'static, PhotocraftApp>, pos: egui::Pos2) {
+    finger(h, pos, egui::TouchPhase::Start);
+    h.run_steps(3);
+    finger(h, pos, egui::TouchPhase::End);
+    h.run_steps(4);
+}
+
+#[test]
+fn a_finger_opens_the_dropdowns() {
+    let mut h = harness(PORTRAIT, LayoutPref::Auto, false);
+    h.get_by_label("New Document").click();
+    h.run_steps(4);
+    let pos = h.query_all_by_role(egui::accesskit::Role::ComboBox).next().expect("a dropdown").rect().center();
+    finger_tap(&mut h, pos);
+    assert!(egui::Popup::is_any_open(&h.ctx), "the Units list");
+}
+
+#[test]
+fn a_finger_on_the_options_bar_tool_lists_its_group() {
+    let mut h = editor_harness(PORTRAIT);
+    h.state_mut().ui.tool = crate::state::Tool::Brush;
+    h.run_steps(2);
+    // The options bar's tool, below the top bar (the tool bar's Brush is at the bottom).
+    let pos = h.query_all_by_label("Brush Tool").map(|n| n.rect().center()).min_by(|a, b| a.y.total_cmp(&b.y)).expect("the options bar's tool");
+    finger_tap(&mut h, pos);
+    assert!(slot_flyout_open(&h), "the Brush group, with Pencil");
+    h.get_by_label("Pencil Tool").click();
+    h.run_steps(4);
+    assert_eq!(h.state().ui.tool, crate::state::Tool::Pencil);
+}
