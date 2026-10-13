@@ -1,9 +1,14 @@
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use photocraft_codecs::{ChannelLayout, EncodeOptions, Image};
 use photocraft_doc::Document;
 use photocraft_ui_egui::theme::ThemeKind;
-use photocraft_ui_egui::{FileDialogAnswer, FileDialogRequest, PhotocraftApp, Services};
+use photocraft_ui_egui::{PhotocraftApp, Services};
+
+use crate::files;
+use crate::system::{self, Insets};
 use winit::platform::android::activity::AndroidApp;
 
 /// The NativeActivity's entry point (android-activity calls it on its own thread).
@@ -13,8 +18,8 @@ use winit::platform::android::activity::AndroidApp;
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
     android_logger::init_once(android_logger::Config::default().with_max_level(log::LevelFilter::Info).with_tag("photocraft"));
-    let files = app.external_data_path().or_else(|| app.internal_data_path());
     let prefs = app.internal_data_path().map(|p| p.join("preferences.json"));
+    let android = app.clone();
     let mut options = eframe::NativeOptions { android_app: Some(app), ..Default::default() };
     photocraft_ui_egui::gpu_canvas::use_adapter_limits(&mut options.wgpu_options.wgpu_setup);
     let result = eframe::run_native(
@@ -22,14 +27,16 @@ fn android_main(app: AndroidApp) {
         options,
         Box::new(move |cc| {
             PhotocraftApp::setup_context(&cc.egui_ctx, ThemeKind::Pro);
-            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services(files, prefs));
+            let queue = files::Queue::default();
+            let last_dir = Rc::new(RefCell::new(PathBuf::from(files::STORAGE)));
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services(queue.clone(), last_dir.clone(), prefs));
             app.set_theme(&cc.egui_ctx, ThemeKind::Pro);
             if let Some(rs) = cc.wgpu_render_state.clone() {
                 log::info!("photocraft: wgpu backend {:?}", rs.adapter.get_info().backend);
                 app.perf.gpu_info.set_adapter(&rs.adapter.get_info());
                 app.set_wgpu(rs);
             }
-            Ok(Box::new(app))
+            Ok(Box::new(Shell { app, android, queue, last_dir, insets: None }))
         }),
     );
     if let Err(e) = result {
@@ -37,7 +44,74 @@ fn android_main(app: AndroidApp) {
     }
 }
 
-fn services(files: Option<PathBuf>, prefs: Option<PathBuf>) -> Services {
+/// The app, plus what Android needs around it: the system bars kept clear, and PhotoCraft's own
+/// file browser for the file dialogs.
+struct Shell {
+    app: PhotocraftApp,
+    android: AndroidApp,
+    queue: files::Queue,
+    /// Where the file browser opens: the last folder used.
+    last_dir: Rc<RefCell<PathBuf>>,
+    /// The window size (px) the insets were read at, when they were read (s), and the insets.
+    insets: Option<([i32; 2], f64, Insets)>,
+}
+
+impl eframe::App for Shell {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.app.logic(ctx, frame);
+    }
+
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.keep_clear_of_system_bars(ctx, raw_input);
+        self.app.raw_input_hook(ctx, raw_input);
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        if let Some(dir) = files::back(&self.queue, &ctx) {
+            *self.last_dir.borrow_mut() = dir;
+        }
+        // The app inside the safe area (the root Ui spans the whole screen); the bars' strips
+        // in the interface colour behind the system's icons.
+        let safe = ctx.content_rect();
+        ui.painter().rect_filled(ctx.viewport_rect(), 0.0, photocraft_ui_egui::theme::Tokens::get(&ctx).chrome);
+        ui.scope_builder(egui::UiBuilder::new().max_rect(safe), |ui| self.app.ui(ui, frame));
+        let access = files::Access { granted: system::has_file_access, request: system::request_file_access };
+        if let Some(dir) = files::show(&self.queue, &ctx, access) {
+            *self.last_dir.borrow_mut() = dir;
+        }
+    }
+}
+
+impl Shell {
+    /// NativeActivity draws under the status bar, the navigation bar and the camera cutout (and
+    /// the keyboard covers the bottom): give egui those as its safe area, so panels stay inside.
+    /// The system's insets (JNI) are read again when the window changes size and twice a
+    /// second (the keyboard opens without one); the content rect is the fallback.
+    fn keep_clear_of_system_bars(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        let ppp = raw.viewports.get(&raw.viewport_id).and_then(|v| v.native_pixels_per_point).unwrap_or_else(|| ctx.pixels_per_point()) * ctx.zoom_factor();
+        let Some(screen) = raw.screen_rect else { return };
+        let size = [(screen.width() * ppp).round() as i32, (screen.height() * ppp).round() as i32];
+        let now = raw.time.unwrap_or(0.0);
+        let stale = self.insets.is_none_or(|(at, when, _)| at != size || now - when > 0.5);
+        if stale {
+            let cr = self.android.content_rect();
+            let from_rect = if cr.right > cr.left && cr.bottom > cr.top { [cr.left, cr.top, size[0] - cr.right, size[1] - cr.bottom] } else { [0; 4] };
+            let from_system = system::insets().unwrap_or_else(|e| {
+                log::warn!("photocraft: window insets: {e}");
+                [0; 4]
+            });
+            let insets: Insets = std::array::from_fn(|i| from_rect.get(i).copied().unwrap_or(0).max(from_system.get(i).copied().unwrap_or(0)).max(0));
+            self.insets = Some((size, now, insets));
+        }
+        if let Some((_, _, [left, top, right, bottom])) = self.insets {
+            let pt = |px: i32| px as f32 / ppp;
+            raw.safe_area_insets = Some(egui::SafeAreaInsets(egui::epaint::MarginF32 { left: pt(left), right: pt(right), top: pt(top), bottom: pt(bottom) }));
+        }
+    }
+}
+
+fn services(queue: files::Queue, last_dir: Rc<RefCell<PathBuf>>, prefs: Option<PathBuf>) -> Services {
     let prefs_save = prefs.clone();
     Services {
         import: Some(Box::new(|name: &str, bytes: &[u8], max_svg_group_depth: usize| {
@@ -59,22 +133,8 @@ fn services(files: Option<PathBuf>, prefs: Option<PathBuf>) -> Services {
             opts.psd_maximize_compatibility = settings.psd_maximize_compatibility;
             photocraft_io::export(doc, path, &opts).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string())
         })),
-        file_dialog: Some(Box::new(move |request, _parent, reply| {
-            let answer = match request {
-                FileDialogRequest::Open { .. } | FileDialogRequest::Folder { .. } => {
-                    FileDialogAnswer::Unavailable("Opening files on Android comes with the system file picker; for now, create a new document.".into())
-                }
-                // No save dialog yet: the suggested name, in the app's folder.
-                FileDialogRequest::Save { suggested } => match &files {
-                    Some(dir) => {
-                        let name = Path::new(&suggested).file_name().map_or_else(|| suggested.clone(), |n| n.to_string_lossy().to_string());
-                        FileDialogAnswer::SaveTo(dir.join(name).to_string_lossy().to_string())
-                    }
-                    None => FileDialogAnswer::Unavailable("This device gives PhotoCraft no folder to save in.".into()),
-                },
-            };
-            reply.send(Some(answer));
-        })),
+        // PhotoCraft's own browser (files.rs), drawn by the shell until the user picks.
+        file_dialog: Some(files::service(queue, last_dir)),
         write: Some(Box::new(|path: &str, bytes: &[u8]| write_file(Path::new(path), bytes))),
         encode_png: Some(Box::new(|w, h, rgba| {
             let img = Image::from_u8(w, h, ChannelLayout::Rgba, rgba.to_vec()).map_err(|e| e.to_string())?;

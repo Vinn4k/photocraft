@@ -225,10 +225,13 @@ fn tools(app: &mut PhotocraftApp, ui: &mut egui::Ui, t: &Tokens) {
         if slot.len() > 1 {
             crate::panels::paint_toolbar_flyout_indicator(ui, t, &resp);
         }
+        // A tap on the tool already in use opens its group (the corner triangle), as do a long
+        // press and a right click.
+        let reopen = resp.clicked() && on && !resp.long_touched();
         if resp.clicked() {
             app.ui.tool = tool;
         }
-        if slot.len() > 1 && (resp.long_touched() || resp.secondary_clicked()) {
+        if slot.len() > 1 && (reopen || resp.long_touched() || resp.secondary_clicked()) {
             egui::Popup::open_id(ui.ctx(), key.with("flyout"));
         }
         egui::Popup::from_response(&resp).id(key.with("flyout")).open_memory(None).show(|ui| {

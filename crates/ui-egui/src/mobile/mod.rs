@@ -505,6 +505,11 @@ pub fn mode(app: &PhotocraftApp, ctx: &egui::Context) -> LayoutMode {
 }
 
 /// Draw the phone layout: the route's screen and, over the Editor, its sheet.
+/// Touch-sized rows for a popup menu opened from the shared desktop code.
+pub(crate) fn touch_menu_style(ui: &mut egui::Ui) {
+    touch::style(ui);
+}
+
 pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     app.ui.mobile.sync(app.session.documents().len());
