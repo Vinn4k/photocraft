@@ -93,6 +93,22 @@ dois dedos fazem pan/zoom/rotação; toque com dois dedos desfaz, com três refa
 longo numa camada abre o menu de contexto dela. Um painel por vez no celular; alvos de toque ≥ 48 dp
 (44 dp só em linhas densas do painel em paisagem).
 
+## Telas no código (`crates/ui-egui/src/mobile`)
+
+Iniciado em 13/10/2026, adiantando a fase 3 (o layout pode ser conferido no desktop antes do build
+Android da fase 2).
+
+- **Roteador** (`mobile/mod.rs`): modo de layout `desktop`/`phone` pelo tamanho da janela (celular
+  quando a largura < 600 dp ou a altura < 480 dp, as classes compactas do Android). O app desktop
+  mantém o layout dele em qualquer tamanho (`layout: desktop` por padrão); Android e web usam
+  `auto`. Rotas Início, Novo documento e Editor; folhas Camadas, Pincel, Curvas, Cor, Menus e
+  Exportar, uma por vez e só sobre o Editor; pilha de voltar (o Voltar do Android chega como a
+  tecla `BrowserBack`). Estado em `UiState.mobile`; `ui.set {"mobile": {layout, route, sheet,
+  back}}` navega e `ui.inspect` mostra `mobile` (ver `docs/control-protocol.md`).
+- Conferência visual: `cargo run -p photocraft-ui-egui --example snapshot -- --size 412x892
+  --layout auto --out phone.png` (sem GPU, use o Vulkan por software: `mesa-vulkan-drivers` e
+  `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`).
+
 ## Mensagem inicial para uma sessão nova
 
 > Estou trabalhando no fork `Vinn4k/photocraft`, branch `android-mobile`. Leia

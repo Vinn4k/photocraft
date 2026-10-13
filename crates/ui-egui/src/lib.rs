@@ -120,6 +120,7 @@ pub mod mask_trash_prompt;
 pub mod menu_catalog;
 pub mod menu_nav;
 pub mod menus;
+pub mod mobile;
 pub mod monitor_status;
 pub mod move_box;
 pub mod move_hover;
@@ -1733,7 +1734,13 @@ impl eframe::App for PhotocraftApp {
         // The OS title bar (and the taskbar / Alt-Tab entry) follows the active file; with the
         // system title bar this is where the document name lives, as the in-app title is hidden.
         panels::sync_window_title(self, &ctx);
-        let chrome = !self.ui.view.hides_chrome();
+        // A phone-sized window (or a forced phone layout) draws the phone router instead of the
+        // desktop chrome; the windows and dialogs below are shared (docs/android-mobile.md).
+        let phone = mobile::mode(self, &ctx) == mobile::LayoutMode::Phone;
+        let chrome = !phone && !self.ui.view.hides_chrome();
+        if phone {
+            mobile::show(self, ui);
+        }
         if chrome && self.ui.panels.menu_bar {
             panels::title_bar(self, ui);
         }
@@ -1751,9 +1758,11 @@ impl eframe::App for PhotocraftApp {
         }
         let t = theme::Tokens::get(&ctx);
         let backdrop = if chrome { prefs_ui::pasteboard_color(self).unwrap_or(t.canvas) } else { egui::Color32::BLACK };
-        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(backdrop)).show(ui, |ui| {
-            canvas::document_area(self, ui);
-        });
+        if !phone {
+            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(backdrop)).show(ui, |ui| {
+                canvas::document_area(self, ui);
+            });
+        }
         panels::properties_window(self, &ctx);
         brush_panel::window(self, &ctx);
         preset_panels::windows(self, &ctx);

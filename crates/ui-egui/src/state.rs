@@ -1253,6 +1253,9 @@ pub struct UiState {
     pub camera_raw_scope: CameraRawScopeState,
     #[serde(default)]
     pub camera_raw_preview: CameraRawPreviewState,
+    /// The phone layout's route, sheet and back stack (`mobile`).
+    #[serde(default)]
+    pub mobile: crate::mobile::MobileState,
 }
 
 impl Default for UiState {
@@ -1336,6 +1339,7 @@ impl Default for UiState {
             chrome: Default::default(),
             camera_raw_scope: Default::default(),
             camera_raw_preview: Default::default(),
+            mobile: Default::default(),
         }
     }
 }

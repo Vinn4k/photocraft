@@ -8,6 +8,9 @@
 //!
 //! `--system-theme light|dark|none` supplies a deterministic OS appearance for theme captures.
 //!
+//! `--layout auto|desktop|phone` picks the layout mode (`mobile`): `auto` follows the window size, so
+//! `--size 412x892 --layout auto` renders the phone layout of a Galaxy S26 Ultra held upright.
+//!
 //! `--safe-gpu` draws the canvas on the CPU path, like the app's `--safe-gpu` launch.
 //! `--wayland-notice` previews the native file drag-and-drop guidance shown in Wayland sessions.
 //! `--custom-titlebar` draws the Windows/Linux title bar (caption buttons in the top bar).
@@ -64,6 +67,7 @@ fn main() {
     // `--background-jobs`: long commands run as background jobs, as in the desktop app (#210).
     let background_jobs = args.iter().any(|a| a == "--background-jobs");
     let custom_titlebar = args.iter().any(|a| a == "--custom-titlebar");
+    let layout = arg(&args, "--layout").map(|id| photocraft_ui_egui::mobile::LayoutPref::from_id(&id).expect("--layout must be auto, desktop or phone"));
     // `--settle-ms N`: keep rendering frames for N ms before the capture (e.g. mid-job).
     let settle_ms: u64 = arg(&args, "--settle-ms").and_then(|s| s.parse().ok()).unwrap_or(0);
     let mut harness =
@@ -75,6 +79,9 @@ fn main() {
             let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
             app.background_jobs = background_jobs;
             app.custom_titlebar = custom_titlebar;
+            if let Some(layout) = layout {
+                app.ui.mobile.layout = layout;
+            }
             // `--safe-gpu`: the CPU canvas, as the desktop app's `--safe-gpu` launch.
             if safe_gpu {
                 app.perf.gpu_info.selected = "cpu".into();
