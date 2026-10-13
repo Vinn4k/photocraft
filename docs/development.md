@@ -377,6 +377,46 @@ How the web shell (`apps/photocraft-web/src/web.rs`) differs from desktop:
 - Headless Chrome on macOS (`--headless=new --enable-unsafe-webgpu`) gets a real WebGPU adapter.
 
 
+## Android build (test APK)
+
+`apps/photocraft-android` is the egui shell in a NativeActivity (eframe with winit's
+`android-activity`, wgpu on Vulkan); the phone and tablet layouts come from `ui-egui`'s `mobile`
+module. `cargo xtask android` packs it into an APK with [cargo-apk](https://crates.io/crates/cargo-apk).
+
+One-time setup (Linux; macOS is the same with the macOS command-line tools):
+
+```sh
+# Android SDK command-line tools: https://developer.android.com/studio#command-tools
+export ANDROID_HOME=$HOME/Android/Sdk        # where you unpacked them (cmdline-tools/latest/...)
+$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-tools;34.0.0" \
+    "ndk;27.2.12479018" "platform-tools"
+rustup target add aarch64-linux-android
+cargo install cargo-apk --locked
+# plus a JDK 17+ (keytool), e.g. apt install openjdk-17-jdk-headless
+cargo xtask android --doctor                  # lists anything still missing
+```
+
+Build, and optionally install over USB (enable USB debugging on the phone):
+
+```sh
+cargo xtask android                 # release APK: target/release/apk/photocraft.apk
+cargo xtask android --run           # + adb install -r and start it on the connected phone
+cargo xtask android --debug         # dev profile (faster to build, slower to run)
+adb logcat -s photocraft RustStdoutStderr   # the app's log
+```
+
+Without a cable, copy the APK to the phone and open it (allow "install unknown apps" for the
+file manager). The **Android APK** workflow (`.github/workflows/android.yml`) builds the same APK
+on every push to `android-mobile` (and on demand from the Actions tab) and attaches it to the run
+as `photocraft-android-apk`.
+
+The APK is signed with the debug key (`~/.android/debug.keystore`, created on first use) unless
+`CARGO_APK_RELEASE_KEYSTORE` and `CARGO_APK_RELEASE_KEYSTORE_PASSWORD` name another key. It needs
+Android 9+ (API 28) on arm64 with Vulkan. Until the system file picker (phase 5 of
+`docs/android-mobile.md`), Save, Save As and Export write to
+`Android/data/ai.storyteller.photocraft/files/`, and File › Open says opening files is not
+available yet.
+
 ## Indexed Color timings
 
 `cargo run --release -p photocraft-engine --example indexed_color_perf -- image.png` measures

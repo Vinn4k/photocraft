@@ -3,6 +3,7 @@
 //! Pure Rust (std + serde_json). External tools (`cargo`, `curl`, `tar`) are
 //! invoked through `std::process::Command`.
 
+mod android;
 mod corpus;
 mod corpus_pins;
 mod i18n_coverage;
@@ -64,11 +65,12 @@ fn main() -> ExitCode {
         Some("scorecard") => scorecard::run(&root(), &rest),
         Some("version") => version::run(&root(), &rest),
         Some("ico") => ico::run(&rest),
+        Some("android") => android::run(&root(), &rest),
         Some("-h" | "--help" | "help") | None => {
-            print!("{USAGE}");
+            print!("{USAGE}{}", android::USAGE);
             Ok(())
         }
-        Some(other) => Err(format!("unknown command `{other}`\n\n{USAGE}")),
+        Some(other) => Err(format!("unknown command `{other}`\n\n{USAGE}{}", android::USAGE)),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
