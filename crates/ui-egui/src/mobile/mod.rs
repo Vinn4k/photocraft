@@ -12,8 +12,11 @@ use serde_json::{Value, json};
 
 use crate::PhotocraftApp;
 
+mod home;
+mod new_document;
 #[cfg(test)]
 mod tests;
+pub mod touch;
 
 /// Below this width (points, which are dp on Android) the window is a phone held upright:
 /// Android's compact width class.
@@ -192,6 +195,12 @@ pub struct MobileState {
     pub sheet: Option<Sheet>,
     /// Routes Back returns to, oldest first. Home is the root, so it is never above another route.
     pub history: Vec<Route>,
+    /// The New Document screen's fields, as the desktop dialog's (`new_doc_ui`): filled when the
+    /// screen opens, dropped when it is left.
+    pub new_document: serde_json::Map<String, Value>,
+    /// Open documents last frame: one more means a document was opened or created.
+    #[serde(skip)]
+    pub seen_documents: usize,
 }
 
 impl MobileState {
@@ -261,12 +270,21 @@ impl MobileState {
         true
     }
 
-    /// Keep the route possible: the Editor needs a document, so closing the last one returns Home.
-    pub fn sync(&mut self, has_document: bool) {
-        if self.route == Route::Editor && !has_document {
+    /// Follow the open documents (`documents`, this frame): a document opened or created from
+    /// Home or New Document shows the Editor (as the desktop Home screen gives way to it), and
+    /// closing the last one returns Home, as the Editor needs a document.
+    pub fn sync(&mut self, documents: usize) {
+        if documents > self.seen_documents && self.route != Route::Editor {
+            self.replace(Route::Editor);
+        }
+        self.seen_documents = documents;
+        if self.route == Route::Editor && documents == 0 {
             self.sheet = None;
             self.history.clear();
             self.route = Route::Home;
+        }
+        if self.route != Route::NewDocument {
+            self.new_document.clear();
         }
     }
 
@@ -290,6 +308,12 @@ impl MobileState {
             Some(None) => next.sheet = None,
             None => {}
         }
+        if let Some(fields) = plan.new_document {
+            if next.route != Route::NewDocument {
+                return Err("mobile.newDocument edits the New Document screen (route newDocument)".into());
+            }
+            next.new_document.extend(fields);
+        }
         if plan.back && !next.back() {
             return Err("nothing to go back to (Home with no sheet open)".into());
         }
@@ -307,6 +331,7 @@ impl MobileState {
             "sheet": self.sheet.map(Sheet::id),
             "history": self.history.iter().map(|r| r.id()).collect::<Vec<_>>(),
             "canGoBack": self.can_go_back(),
+            "newDocument": self.new_document,
         })
     }
 }
@@ -319,17 +344,19 @@ struct Plan {
     /// `Some(None)`: close the sheet.
     sheet: Option<Option<Sheet>>,
     back: bool,
+    /// Fields merged into the New Document screen's (the desktop dialog's field names).
+    new_document: Option<serde_json::Map<String, Value>>,
 }
 
 impl Plan {
-    const KEYS: [&'static str; 4] = ["layout", "route", "sheet", "back"];
+    const KEYS: [&'static str; 5] = ["layout", "route", "sheet", "back", "newDocument"];
 
     fn parse(params: &Value) -> Result<Self, String> {
         let mut plan = Self::default();
         if params.is_null() {
             return Ok(plan);
         }
-        let Some(o) = params.as_object() else { return Err("mobile must be an object {layout?, route?, sheet?, back?}".into()) };
+        let Some(o) = params.as_object() else { return Err("mobile must be an object {layout?, route?, sheet?, back?, newDocument?}".into()) };
         if let Some(key) = o.keys().find(|k| !Self::KEYS.contains(&k.as_str())) {
             return Err(format!("unknown mobile field `{key}` (fields: {})", Self::KEYS.join(", ")));
         }
@@ -356,6 +383,9 @@ impl Plan {
         if let Some(v) = o.get("back").filter(|v| !v.is_null()) {
             plan.back = v.as_bool().ok_or("mobile.back must be true or false")?;
         }
+        if let Some(v) = o.get("newDocument").filter(|v| !v.is_null()) {
+            plan.new_document = Some(v.as_object().cloned().ok_or("mobile.newDocument must be an object of New Document fields")?);
+        }
         Ok(plan)
     }
 }
@@ -368,42 +398,28 @@ pub fn mode(app: &PhotocraftApp, ctx: &egui::Context) -> LayoutMode {
 /// Draw the phone layout: the route's screen and, over the Editor, its sheet.
 pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
-    app.ui.mobile.sync(app.session.active().is_some());
+    app.ui.mobile.sync(app.session.documents().len());
     // Android's Back arrives as the browser Back key (egui-winit maps it).
     if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::BrowserBack)) {
         app.ui.mobile.back();
     }
-    let t = crate::theme::Tokens::get(&ctx);
-    top_bar(app, ui, &t);
-    if app.ui.mobile.route == Route::Editor {
-        sheet_bar(app, ui, &t);
-        if let Some(sheet) = app.ui.mobile.sheet {
-            sheet_panel(app, ui, &t, sheet);
-        }
+    touch::style(ui);
+    match app.ui.mobile.route {
+        Route::Home => home::show(app, ui),
+        Route::NewDocument => new_document::show(app, ui),
+        Route::Editor => editor(app, ui),
     }
-    let fill = if app.ui.mobile.route == Route::Editor { t.canvas } else { t.dock };
-    egui::CentralPanel::default().frame(egui::Frame::NONE.fill(fill)).show(ui, |ui| match app.ui.mobile.route {
-        Route::Editor => crate::canvas::document_area(app, ui),
-        Route::Home => {
-            ui.vertical_centered(|ui| {
-                ui.add_space(24.0);
-                if ui.add(egui::Button::new(tl!("New Document")).min_size(egui::vec2(220.0, 48.0))).clicked() {
-                    app.ui.mobile.go(Route::NewDocument);
-                }
-            });
-        }
-        Route::NewDocument => {
-            ui.vertical_centered(|ui| {
-                ui.add_space(24.0);
-                if ui.add(egui::Button::new(tl!("Create")).min_size(egui::vec2(220.0, 48.0))).clicked() {
-                    match app.run("file.new", json!({})) {
-                        Ok(_) => app.ui.mobile.replace(Route::Editor),
-                        Err(e) => app.ui.status = e.to_string(),
-                    }
-                }
-            });
-        }
-    });
+}
+
+/// The Editor: the canvas, the panel buttons and the open sheet.
+fn editor(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    let t = crate::theme::Tokens::get(ui.ctx());
+    top_bar(app, ui, &t);
+    sheet_bar(app, ui, &t);
+    if let Some(sheet) = app.ui.mobile.sheet {
+        sheet_panel(app, ui, &t, sheet);
+    }
+    egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| crate::canvas::document_area(app, ui));
 }
 
 /// Back and the route's title.

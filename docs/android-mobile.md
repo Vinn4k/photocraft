@@ -105,6 +105,15 @@ Android da fase 2).
   Exportar, uma por vez e só sobre o Editor; pilha de voltar (o Voltar do Android chega como a
   tecla `BrowserBack`). Estado em `UiState.mobile`; `ui.set {"mobile": {layout, route, sheet,
   back}}` navega e `ui.inspect` mostra `mobile` (ver `docs/control-protocol.md`).
+- **Início** (`mobile/home.rs`): Novo documento e Abrir… em cartões, Recentes em grade de 2
+  colunas (nome e pasta; toque abre, toque longo oferece Remover dos recentes / Limpar). Abrir
+  ou criar um documento leva ao Editor. Busca e Preferências da barra ficam para depois.
+- **Novo documento** (`mobile/new_document.rs`): abas de categoria do Photoshop, predefinições em
+  grade de 3 e Detalhes da predefinição (nome, largura/altura, unidade, resolução, orientação,
+  modo de cor, profundidade, plano de fundo). Usa os mesmos campos e o mesmo Criar
+  (`new_doc_ui::create`) do diálogo do desktop; Voltar a partir do documento criado volta ao
+  Início. A aba Salvas (predefinições do usuário) ainda não está no celular.
+- Componentes de toque em `mobile/touch.rs` (alvos de 48 dp, campos de 44 dp).
 - Conferência visual: `cargo run -p photocraft-ui-egui --example snapshot -- --size 412x892
   --layout auto --out phone.png` (sem GPU, use o Vulkan por software: `mesa-vulkan-drivers` e
   `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`).

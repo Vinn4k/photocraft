@@ -76,7 +76,7 @@ pub const CATEGORIES: &[(&str, &[Preset])] = &[
     ),
 ];
 
-const DEPTH_OPTIONS: &[(u64, &str, &str)] = &[(8, "8 bit", "Integer"), (16, "16 bit", "Integer"), (32, "32 bit (float)", "Floating point")];
+pub(crate) const DEPTH_OPTIONS: &[(u64, &str, &str)] = &[(8, "8 bit", "Integer"), (16, "16 bit", "Integer"), (32, "32 bit (float)", "Floating point")];
 
 /// Width/Height units: (key, label, units per inch; 0 = pixels).
 pub const UNITS: &[(&str, &str, f32)] =
@@ -201,6 +201,22 @@ pub fn apply_preset(f: &mut Map<String, Value>, p: &Preset, units: &UnitsAndRule
     f.insert("__unit".into(), json!(if is_print(p) { "in" } else { "px" }));
 }
 
+/// Create: `file.new` with the fields, the view fit to the window, and on success the settings
+/// remembered for the next New Document and listed under File › New › Recent. The New Document
+/// dialog and the phone's New Document screen (`mobile`) both create through here.
+pub fn create(app: &mut crate::PhotocraftApp, f: &Map<String, Value>) -> Result<Value, String> {
+    let r = app.run("file.new", command_params(f));
+    if let Some(i) = app.session.active_index() {
+        app.ui.views[i].fit_pending = true;
+    }
+    if r.is_ok() {
+        crate::remember_new_document(app, f);
+        // File › New › Recent. Best effort: the document exists either way.
+        let _ = app.run("document.recent.add", json!({"settings": document_settings(f)}));
+    }
+    r
+}
+
 /// Fields `file.new` takes (drops the dialog's `__` UI keys).
 pub fn command_params(f: &Map<String, Value>) -> Value {
     Value::Object(f.iter().filter(|(k, _)| !k.starts_with("__")).map(|(k, v)| (k.clone(), v.clone())).collect())
@@ -226,11 +242,11 @@ pub fn set_resolution(f: &mut Map<String, Value>, new_ppi: f32) {
     f.remove("__savedPreset");
 }
 
-fn get_f(f: &Map<String, Value>, k: &str, d: f32) -> f32 {
+pub(crate) fn get_f(f: &Map<String, Value>, k: &str, d: f32) -> f32 {
     f.get(k).and_then(Value::as_f64).map_or(d, |v| v as f32)
 }
 
-fn get_s(f: &Map<String, Value>, k: &str, d: &str) -> String {
+pub(crate) fn get_s(f: &Map<String, Value>, k: &str, d: &str) -> String {
     f.get(k).and_then(Value::as_str).unwrap_or(d).to_string()
 }
 
@@ -241,7 +257,7 @@ fn small_label(ui: &mut egui::Ui, s: &str) {
 
 /// Lay out a preset card's title centred in `width`: wrapped onto at most two lines, the rest
 /// elided, so long translations stay inside the card.
-fn card_title(painter: &egui::Painter, title: &str, width: f32, color: egui::Color32) -> std::sync::Arc<egui::Galley> {
+pub(crate) fn card_title(painter: &egui::Painter, title: &str, width: f32, color: egui::Color32) -> std::sync::Arc<egui::Galley> {
     let mut job = egui::text::LayoutJob::simple(title.to_owned(), egui::FontId::proportional(12.0), color, width);
     job.wrap.max_rows = 2;
     job.halign = egui::Align::Center;
@@ -249,7 +265,7 @@ fn card_title(painter: &egui::Painter, title: &str, width: f32, color: egui::Col
 }
 
 /// Paint a page thumbnail with the preset's aspect ratio.
-fn page_icon(ui: &egui::Ui, r: Rect, w: u32, h: u32, t: &Tokens) {
+pub(crate) fn page_icon(ui: &egui::Ui, r: Rect, w: u32, h: u32, t: &Tokens) {
     let s = 30.0 / (w.max(h) as f32);
     let page = Rect::from_center_size(r.center(), vec2(w as f32 * s, h as f32 * s));
     ui.painter().rect_stroke(page, 1.0, Stroke::new(1.2, t.text_dim), StrokeKind::Inside);
@@ -287,7 +303,7 @@ pub fn document_settings(f: &Map<String, Value>) -> Value {
 }
 
 /// Whether the dialog currently holds `settings` (so its Recent card shows selected).
-fn holds(f: &Map<String, Value>, settings: &DocumentSettings) -> bool {
+pub(crate) fn holds(f: &Map<String, Value>, settings: &DocumentSettings) -> bool {
     // Unset fields hold the dialog's defaults, as the details pane shows them.
     let (w, h) = (get_f(f, "width", 1920.0), get_f(f, "height", 1080.0));
     (w, h, get_f(f, "resolution", 72.0)) == (settings.width as f32, settings.height as f32, settings.resolution)
@@ -297,14 +313,14 @@ fn holds(f: &Map<String, Value>, settings: &DocumentSettings) -> bool {
 }
 
 /// A card in the preset grid: a built-in preset or a recently created document.
-enum Card {
+pub(crate) enum Card {
     Builtin(Preset),
     Recent(DocumentSettings),
 }
 
 impl Card {
     /// Pixel size and resolution; a built-in preset at the Units & Rulers preset resolutions.
-    fn size(&self, units: &UnitsAndRulers) -> (u32, u32, f32) {
+    pub(crate) fn size(&self, units: &UnitsAndRulers) -> (u32, u32, f32) {
         match self {
             Card::Builtin(listed) => {
                 let p = at_pref_resolutions(listed, units);
@@ -315,7 +331,7 @@ impl Card {
     }
 
     /// The preset's name; a recent document takes the name of the built-in preset it matches.
-    fn title(&self) -> &'static str {
+    pub(crate) fn title(&self) -> &'static str {
         match self {
             Card::Builtin(p) => p.0,
             Card::Recent(s) => {
@@ -325,7 +341,7 @@ impl Card {
     }
 
     /// The size line, in the unit the preset is specified in (a recent one: the unit it was made in).
-    fn size_line(&self, units: &UnitsAndRulers) -> String {
+    pub(crate) fn size_line(&self, units: &UnitsAndRulers) -> String {
         let (w, h, ppi) = self.size(units);
         let unit = match self {
             Card::Builtin(p) if is_print(p) => "in",
@@ -343,7 +359,7 @@ impl Card {
 
 /// The Recent category: the Clipboard preset, the documents recently created here (newest
 /// first), then the built-in defaults they don't already cover.
-fn recent_cards(f: &Map<String, Value>, recent: &[DocumentSettings], units: &UnitsAndRulers) -> Vec<Card> {
+pub(crate) fn recent_cards(f: &Map<String, Value>, recent: &[DocumentSettings], units: &UnitsAndRulers) -> Vec<Card> {
     let mut cards: Vec<Card> = clipboard_preset(f).map(Card::Builtin).into_iter().collect();
     cards.extend(recent.iter().cloned().map(Card::Recent));
     let defaults = CATEGORIES[0].1.iter().filter(|p| {
