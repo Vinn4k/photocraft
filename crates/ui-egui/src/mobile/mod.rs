@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 
 use crate::PhotocraftApp;
 
+mod editor;
 mod home;
 mod new_document;
 #[cfg(test)]
@@ -153,10 +154,11 @@ pub enum Sheet {
     Menus,
     /// Export As and Save.
     Export,
+    History,
 }
 
 impl Sheet {
-    pub const ALL: [Self; 6] = [Self::Layers, Self::Brush, Self::Curves, Self::Color, Self::Menus, Self::Export];
+    pub const ALL: [Self; 7] = [Self::Layers, Self::Brush, Self::Curves, Self::Color, Self::Menus, Self::Export, Self::History];
 
     pub fn id(self) -> &'static str {
         match self {
@@ -166,6 +168,7 @@ impl Sheet {
             Self::Color => "color",
             Self::Menus => "menus",
             Self::Export => "export",
+            Self::History => "history",
         }
     }
 
@@ -182,6 +185,69 @@ impl Sheet {
             Self::Color => "Color",
             Self::Menus => "Menus",
             Self::Export => "Export",
+            Self::History => "History",
+        }
+    }
+}
+
+/// The on-screen modifier keys: each stays down until tapped again, like a held key.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Modifiers {
+    pub shift: bool,
+    pub alt: bool,
+    pub ctrl: bool,
+}
+
+impl Modifiers {
+    pub fn any(self) -> bool {
+        self.shift || self.alt || self.ctrl
+    }
+
+    /// Add the held keys to `m` (Ctrl is the command key off macOS, as a keyboard's would be).
+    pub fn add_to(self, m: &mut egui::Modifiers) {
+        m.shift |= self.shift;
+        m.alt |= self.alt;
+        if self.ctrl {
+            m.ctrl = true;
+            if !cfg!(target_os = "macos") {
+                m.command = true;
+            }
+        }
+    }
+}
+
+/// Add the on-screen keys to this frame's input in the phone editor, so a tap with Alt down is
+/// an Alt-click, as with a keyboard. egui keeps the modifiers from `ModifiersChanged` events: the
+/// held keys ride on one at the start of the frame (and on the keyboard's own), and come off again
+/// once released or outside the editor.
+pub fn hold_modifiers(app: &mut PhotocraftApp, ctx: &egui::Context, raw: &mut egui::RawInput) {
+    let size = raw.screen_rect.map_or_else(|| ctx.content_rect().size(), |r| r.size());
+    let editor = app.ui.mobile.route == Route::Editor && app.ui.mobile.layout.resolve(size) == LayoutMode::Phone;
+    let keys = if editor { app.ui.mobile.modifiers } else { Modifiers::default() };
+    let applied = std::mem::replace(&mut app.ui.mobile.applied_modifiers, keys);
+    if !keys.any() && !applied.any() {
+        return;
+    }
+    // What the keyboard holds: this frame's modifiers without the keys added last frame.
+    let mut base = ctx.input(|i| i.modifiers);
+    base.shift &= !applied.shift;
+    base.alt &= !applied.alt;
+    if applied.ctrl {
+        base.ctrl = false;
+        if !cfg!(target_os = "macos") {
+            base.command = false;
+        }
+    }
+    keys.add_to(&mut base);
+    raw.events.insert(0, egui::Event::ModifiersChanged(base));
+    for e in &mut raw.events {
+        match e {
+            egui::Event::ModifiersChanged(m)
+            | egui::Event::Key { modifiers: m, .. }
+            | egui::Event::PointerButton { modifiers: m, .. }
+            | egui::Event::MouseWheel { modifiers: m, .. } => keys.add_to(m),
+            _ => {}
         }
     }
 }
@@ -198,6 +264,13 @@ pub struct MobileState {
     /// The New Document screen's fields, as the desktop dialog's (`new_doc_ui`): filled when the
     /// screen opens, dropped when it is left.
     pub new_document: serde_json::Map<String, Value>,
+    /// Shift, Alt and Ctrl held from the editor's on-screen keys.
+    pub modifiers: Modifiers,
+    /// The editor's All Tools grid is open.
+    pub all_tools: bool,
+    /// The keys `hold_modifiers` added to the input last frame.
+    #[serde(skip)]
+    pub applied_modifiers: Modifiers,
     /// Open documents last frame: one more means a document was opened or created.
     #[serde(skip)]
     pub seen_documents: usize,
@@ -286,6 +359,11 @@ impl MobileState {
         if self.route != Route::NewDocument {
             self.new_document.clear();
         }
+        // The on-screen keys and the tool grid belong to the editor.
+        if self.route != Route::Editor {
+            self.modifiers = Modifiers::default();
+            self.all_tools = false;
+        }
     }
 
     /// Apply `ui.set`'s `mobile` object: `{layout?, route?, sheet?, back?}`, in that order. Every
@@ -307,6 +385,9 @@ impl MobileState {
             Some(Some(sheet)) => next.open_sheet(sheet)?,
             Some(None) => next.sheet = None,
             None => {}
+        }
+        if let Some(keys) = plan.modifiers {
+            next.modifiers = keys;
         }
         if let Some(fields) = plan.new_document {
             if next.route != Route::NewDocument {
@@ -332,6 +413,8 @@ impl MobileState {
             "history": self.history.iter().map(|r| r.id()).collect::<Vec<_>>(),
             "canGoBack": self.can_go_back(),
             "newDocument": self.new_document,
+            "modifiers": self.modifiers,
+            "allTools": self.all_tools,
         })
     }
 }
@@ -346,17 +429,18 @@ struct Plan {
     back: bool,
     /// Fields merged into the New Document screen's (the desktop dialog's field names).
     new_document: Option<serde_json::Map<String, Value>>,
+    modifiers: Option<Modifiers>,
 }
 
 impl Plan {
-    const KEYS: [&'static str; 5] = ["layout", "route", "sheet", "back", "newDocument"];
+    const KEYS: [&'static str; 6] = ["layout", "route", "sheet", "back", "newDocument", "modifiers"];
 
     fn parse(params: &Value) -> Result<Self, String> {
         let mut plan = Self::default();
         if params.is_null() {
             return Ok(plan);
         }
-        let Some(o) = params.as_object() else { return Err("mobile must be an object {layout?, route?, sheet?, back?, newDocument?}".into()) };
+        let Some(o) = params.as_object() else { return Err("mobile must be an object {layout?, route?, sheet?, back?, newDocument?, modifiers?}".into()) };
         if let Some(key) = o.keys().find(|k| !Self::KEYS.contains(&k.as_str())) {
             return Err(format!("unknown mobile field `{key}` (fields: {})", Self::KEYS.join(", ")));
         }
@@ -383,6 +467,13 @@ impl Plan {
         if let Some(v) = o.get("back").filter(|v| !v.is_null()) {
             plan.back = v.as_bool().ok_or("mobile.back must be true or false")?;
         }
+        if let Some(v) = o.get("modifiers").filter(|v| !v.is_null()) {
+            let keys = v.as_object().filter(|k| k.iter().all(|(name, on)| ["shift", "alt", "ctrl"].contains(&name.as_str()) && on.is_boolean()));
+            if keys.is_none() {
+                return Err("mobile.modifiers must be an object of booleans {shift?, alt?, ctrl?}".into());
+            }
+            plan.modifiers = Some(serde_json::from_value(v.clone()).map_err(|e| format!("mobile.modifiers: {e}"))?);
+        }
         if let Some(v) = o.get("newDocument").filter(|v| !v.is_null()) {
             plan.new_document = Some(v.as_object().cloned().ok_or("mobile.newDocument must be an object of New Document fields")?);
         }
@@ -399,6 +490,7 @@ pub fn mode(app: &PhotocraftApp, ctx: &egui::Context) -> LayoutMode {
 pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     app.ui.mobile.sync(app.session.documents().len());
+    editor::follow_home_button(app);
     // Android's Back arrives as the browser Back key (egui-winit maps it).
     if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::BrowserBack)) {
         app.ui.mobile.back();
@@ -407,68 +499,29 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     match app.ui.mobile.route {
         Route::Home => home::show(app, ui),
         Route::NewDocument => new_document::show(app, ui),
-        Route::Editor => editor(app, ui),
+        Route::Editor => editor::show(app, ui),
     }
 }
 
-/// The Editor: the canvas, the panel buttons and the open sheet.
-fn editor(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
-    let t = crate::theme::Tokens::get(ui.ctx());
-    top_bar(app, ui, &t);
-    sheet_bar(app, ui, &t);
-    if let Some(sheet) = app.ui.mobile.sheet {
-        sheet_panel(app, ui, &t, sheet);
-    }
-    egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| crate::canvas::document_area(app, ui));
-}
-
-/// Back and the route's title.
-fn top_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, t: &crate::theme::Tokens) {
-    egui::Panel::top("mobile-top-bar").exact_size(56.0).frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(8, 0))).show(ui, |ui| {
-        crate::direction::horizontal_centered(ui, |ui| {
-            if app.ui.mobile.route != Route::Home && ui.add(egui::Button::new(tl!("Back")).min_size(egui::vec2(48.0, 48.0))).clicked() {
-                app.ui.mobile.back();
-            }
-            let title = match app.ui.mobile.route {
-                Route::Editor => app.session.active().map(|st| st.doc.name.clone()).unwrap_or_default(),
-                route => crate::i18n::t(route.title()).to_string(),
-            };
-            ui.label(egui::RichText::new(title).strong());
-        });
+/// The open sheet in portrait: about two thirds of the height, its title and Close on top.
+pub(super) fn sheet_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui, t: &crate::theme::Tokens, sheet: Sheet) {
+    let height = (ui.max_rect().height() * 0.62).max(160.0);
+    egui::Panel::bottom("mobile-sheet").exact_size(height).frame(egui::Frame::NONE.fill(t.dock).inner_margin(egui::Margin::symmetric(12, 4))).show(ui, |ui| {
+        // The drag handle of a bottom sheet.
+        let (r, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 12.0), egui::Sense::hover());
+        ui.painter().rect_filled(egui::Rect::from_center_size(r.center(), egui::vec2(40.0, 4.0)), 2.0, t.text_faint);
+        sheet_body(app, ui, t, sheet);
     });
 }
 
-/// The Editor's panel buttons, one per sheet.
-fn sheet_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, t: &crate::theme::Tokens) {
-    egui::Panel::bottom("mobile-sheet-bar").exact_size(56.0).frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(4, 0))).show(
-        ui,
-        |ui| {
-            egui::ScrollArea::horizontal().show(ui, |ui| {
-                crate::direction::horizontal_centered(ui, |ui| {
-                    for sheet in Sheet::ALL {
-                        let open = app.ui.mobile.sheet == Some(sheet);
-                        if ui.add(egui::Button::selectable(open, crate::i18n::t(sheet.title())).min_size(egui::vec2(48.0, 48.0))).clicked() {
-                            // The Editor is the route here, so this cannot fail.
-                            let _ = app.ui.mobile.toggle_sheet(sheet);
-                        }
-                    }
-                });
-            });
-        },
-    );
-}
-
-/// The open sheet: about two thirds of the height, over the bottom of the canvas.
-fn sheet_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui, t: &crate::theme::Tokens, sheet: Sheet) {
-    let height = (ui.max_rect().height() * 0.62).max(160.0);
-    egui::Panel::bottom("mobile-sheet").exact_size(height).frame(egui::Frame::NONE.fill(t.dock).inner_margin(egui::Margin::same(12))).show(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(crate::i18n::t(sheet.title())).strong());
-            ui.with_layout(crate::direction::trailing(), |ui| {
-                if ui.add(egui::Button::new(tl!("Close")).min_size(egui::vec2(48.0, 40.0))).clicked() {
-                    app.ui.mobile.sheet = None;
-                }
-            });
+/// A sheet's title with Close, then its panel.
+pub(super) fn sheet_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, t: &crate::theme::Tokens, sheet: Sheet) {
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(crate::i18n::t(sheet.title())).font(crate::theme::semibold(15.0)).color(t.text));
+        ui.with_layout(crate::direction::trailing(), |ui| {
+            if touch::icon_button(ui, "x", tl!("Close"), false).clicked() {
+                app.ui.mobile.sheet = None;
+            }
         });
     });
 }

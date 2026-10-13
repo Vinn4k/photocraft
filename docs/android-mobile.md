@@ -113,6 +113,16 @@ Android da fase 2).
   modo de cor, profundidade, plano de fundo). Usa os mesmos campos e o mesmo Criar
   (`new_doc_ui::create`) do diálogo do desktop; Voltar a partir do documento criado volta ao
   Início. A aba Salvas (predefinições do usuário) ainda não está no celular.
+- **Editor** (`mobile/editor.rs`), reaproveitando o canvas (`canvas::document_area`, sem as abas
+  de documento) e a barra de opções do desktop (`panels::options_bar_contents`). Retrato: barra
+  superior (voltar, nome e "62% (RGB/8)", desfazer, refazer, exportar, menus), barra de opções,
+  Shift/Alt/Ctrl flutuantes (presos até novo toque; entram como modificadores em toques e teclas),
+  trilho Tamanho/Opacidade para ferramentas de pintura, barra de ferramentas (cores, Mover,
+  Letreiro, Laço, Pincel, Borracha, Texto, com o grupo no toque longo, e a grade de todas as
+  ferramentas) e barra de painéis (Camadas, Ajustes, Propriedades, Histórico, Cor). Paisagem:
+  barra única com as opções, ferramentas na lateral e o painel aberto (272 dp) ao lado da faixa
+  de painéis, recolhendo para a faixa ao fechar. A folha Histórico foi adicionada, como no
+  wireframe da barra de painéis.
 - Componentes de toque em `mobile/touch.rs` (alvos de 48 dp, campos de 44 dp).
 - Conferência visual: `cargo run -p photocraft-ui-egui --example snapshot -- --size 412x892
   --layout auto --out phone.png` (sem GPU, use o Vulkan por software: `mesa-vulkan-drivers` e
