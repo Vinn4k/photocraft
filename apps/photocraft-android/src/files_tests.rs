@@ -26,8 +26,19 @@ fn access() -> Access {
             ASKED.store(true, Ordering::Relaxed);
             Ok("Settings opened".into())
         },
+        pick: Some(|picker, reply| {
+            if PICK_FAILS.load(Ordering::Relaxed) {
+                return Err(("no picker on this phone".into(), Some(reply)));
+            }
+            // As the Gallery answers: the picked file's name and contents.
+            let name = if picker == Picker::Gallery { "IMG_0001.png" } else { "scan.png" };
+            reply.send(Some(FileDialogAnswer::Contents(name.into(), png(5, 3))));
+            Ok(())
+        }),
     }
 }
+
+static PICK_FAILS: AtomicBool = AtomicBool::new(false);
 
 /// The Android shell's frame without the system parts: the app, then the browser over it.
 struct Shell {
@@ -170,4 +181,44 @@ fn snapshot() {
     h.state_mut().app.open_dialog_file().unwrap();
     h.run_steps(6);
     h.render().unwrap().save(PathBuf::from(out).join("android-files.png")).unwrap();
+}
+
+#[test]
+fn open_offers_androids_gallery_and_file_pickers() {
+    let _serial = serial();
+    GRANTED.store(false, Ordering::Relaxed);
+    PICK_FAILS.store(false, Ordering::Relaxed);
+    let tmp = TempDir::new("gallery");
+    let mut h = harness(tmp.0.clone());
+    h.state_mut().app.open_dialog_file().unwrap();
+    h.run_steps(4);
+    // No file access needed for Android's own pickers.
+    h.get_by_label("Gallery").click();
+    h.run_steps(8);
+    let st = h.state().app.session.active().expect("the picked photo opened");
+    assert_eq!((st.doc.size.width, st.doc.size.height), (5, 3));
+    assert!(h.state().queue.borrow().is_none(), "the browser closed");
+    GRANTED.store(true, Ordering::Relaxed);
+}
+
+#[test]
+fn a_picker_that_cannot_open_leaves_the_browser_with_why() {
+    let _serial = serial();
+    GRANTED.store(true, Ordering::Relaxed);
+    PICK_FAILS.store(true, Ordering::Relaxed);
+    let tmp = TempDir::new("nopicker");
+    std::fs::write(tmp.0.join("Album/moon.png"), png(6, 4)).unwrap();
+    let mut h = harness(tmp.0.clone());
+    h.state_mut().app.open_dialog_file().unwrap();
+    h.run_steps(4);
+    h.get_by_label("Files").click();
+    h.run_steps(4);
+    assert!(h.query_by_label("no picker on this phone").is_some(), "says why");
+    // The folders still work.
+    h.get_by_label("Album").click();
+    h.run_steps(4);
+    h.get_by_label("moon.png").click();
+    h.run_steps(8);
+    assert!(h.state().app.session.active().is_some());
+    PICK_FAILS.store(false, Ordering::Relaxed);
 }

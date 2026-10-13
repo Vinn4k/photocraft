@@ -42,6 +42,22 @@ pub struct Access {
     pub granted: fn() -> bool,
     /// Ask; `Ok` says what to do in what opened, `Err` why nothing did.
     pub request: fn() -> Result<String, String>,
+    /// Hand File › Open to one of Android's own pickers, which answers `reply` when the user is
+    /// done. A picker that can't open gives the reply back with why.
+    pub pick: Option<PickFn>,
+}
+
+/// Opens an Android picker for a dialog; on failure, why, and the reply back.
+pub type PickFn = fn(Picker, FileDialogReply) -> Result<(), PickFailed>;
+pub type PickFailed = (String, Option<FileDialogReply>);
+
+/// Android's pickers for File › Open.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Picker {
+    /// The photo picker (the gallery).
+    Gallery,
+    /// The system's file picker, with Gallery, Photos, Drive, Downloads and other apps' files.
+    Files,
 }
 
 /// The app's file dialog service: queue the request for [`show`] to draw. One at a time, as the
@@ -66,6 +82,8 @@ pub struct Browser {
     entries: Option<Result<Vec<Entry>, String>>,
     /// What asking for access said.
     notice: Option<String>,
+    /// Why an Android picker didn't open.
+    pick_error: Option<String>,
 }
 
 struct Entry {
@@ -85,7 +103,7 @@ impl Browser {
                 (dir, p.file_name().map_or_else(|| suggested.clone(), |n| n.to_string_lossy().into_owned()))
             }
         };
-        Browser { request, reply: Some(reply), dir, name, entries: None, notice: None }
+        Browser { request, reply: Some(reply), dir, name, entries: None, notice: None, pick_error: None }
     }
 
     fn answer(&mut self, answer: Option<FileDialogAnswer>) {
@@ -136,6 +154,7 @@ pub fn show(queue: &Queue, ctx: &egui::Context, permission: Access) -> Option<Pa
     let tk = Tokens::get(ctx);
     let rect = ctx.content_rect();
     let mut done: Option<Option<FileDialogAnswer>> = None;
+    let mut chosen: Option<Picker> = None;
     egui::Area::new(egui::Id::new("android-file-browser")).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
         egui::Frame::NONE.fill(tk.dock).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
             ui.set_min_size(rect.size() - vec2(24.0, 16.0));
@@ -153,6 +172,26 @@ pub fn show(queue: &Queue, ctx: &egui::Context, permission: Access) -> Option<Pa
                 }
                 ui.label(RichText::new(title).size(18.0).strong().color(tk.text));
             });
+            // Opening: Android's own pickers first (they need no file access), then the folders.
+            if matches!(browser.request, FileDialogRequest::Open { .. })
+                && permission.pick.is_some()
+            {
+                ui.add_space(4.0);
+                let half = ((ui.available_width() - 8.0) / 2.0).max(80.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    for (picker, icon, label) in [(Picker::Gallery, "image", "Gallery"), (Picker::Files, "folder-open", "Files")] {
+                        if picker_card(ui, icon, t(label), half, &tk).clicked() {
+                            chosen = Some(picker);
+                        }
+                    }
+                });
+                ui.label(RichText::new(t("Gallery, Photos, Drive, Downloads… or a folder below.")).color(tk.text_dim));
+                if let Some(e) = &browser.pick_error {
+                    ui.label(RichText::new(e).color(tk.text_dim));
+                }
+                ui.separator();
+            }
             if !access {
                 ui.add_space(12.0);
                 ui.label(RichText::new(t("PhotoCraft needs access to your files to open and save them. Turn on \"Allow access to manage all files\" for PhotoCraft, then come back.")).color(tk.text));
@@ -237,6 +276,23 @@ pub fn show(queue: &Queue, ctx: &egui::Context, permission: Access) -> Option<Pa
             }
         });
     });
+    // An Android picker answers the dialog itself: the browser closes.
+    if let (Some(picker), Some(pick)) = (chosen, permission.pick)
+        && let Some(reply) = browser.reply.take()
+    {
+        match pick(picker, reply) {
+            Ok(()) => {
+                let dir = browser.dir.clone();
+                *slot = None;
+                return Some(dir);
+            }
+            Err((e, back)) => {
+                log::error!("photocraft: {picker:?} picker: {e}");
+                browser.reply = back;
+                browser.pick_error = Some(e);
+            }
+        }
+    }
     let answer = done?;
     browser.answer(answer);
     let dir = browser.dir.clone();
@@ -256,6 +312,17 @@ pub fn back(queue: &Queue, ctx: &egui::Context) -> Option<PathBuf> {
     let dir = browser.dir.clone();
     *slot = None;
     Some(dir)
+}
+
+/// A big tap target: an icon over its label.
+fn picker_card(ui: &mut egui::Ui, icon: &str, label: &str, width: f32, tk: &Tokens) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(width, 72.0), Sense::click());
+    let fill = if resp.is_pointer_button_down_on() { tk.row_selected } else { tk.chrome };
+    ui.painter().rect_filled(rect, tk.radius_lg, fill);
+    icons::paint(ui, egui::Rect::from_center_size(rect.center() - vec2(0.0, 12.0), vec2(26.0, 26.0)), icon, 26.0, tk.accent);
+    ui.painter().text(rect.center() + vec2(0.0, 18.0), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(15.0), tk.text);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    resp
 }
 
 fn up_icon() -> &'static str {

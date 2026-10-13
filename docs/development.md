@@ -388,7 +388,7 @@ One-time setup (Linux; macOS is the same with the macOS command-line tools):
 ```sh
 # Android SDK command-line tools: https://developer.android.com/studio#command-tools
 export ANDROID_HOME=$HOME/Android/Sdk        # where you unpacked them (cmdline-tools/latest/...)
-$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-tools;34.0.0" \
+$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-tools;35.0.0" \
     "ndk;27.2.12479018" "platform-tools"
 rustup target add aarch64-linux-android
 cargo install cargo-apk --locked
@@ -414,8 +414,13 @@ The APK is signed with the debug key (`~/.android/debug.keystore`, created on fi
 `CARGO_APK_RELEASE_KEYSTORE` and `CARGO_APK_RELEASE_KEYSTORE_PASSWORD` name another key. It needs
 Android 9+ (API 28) on arm64 with Vulkan.
 
-- **Files:** NativeActivity can't receive the system picker's answer, so Open, Save As and Export
-  use PhotoCraft's own browser (`apps/photocraft-android/src/files.rs`) over shared storage. It
+- **Files:** File › Open offers Android's **Gallery** (photo picker) and **Files** (the system
+  picker: Gallery, Photos, Drive, Downloads, other apps' files) through
+  [robius-file-picker](https://crates.io/crates/robius-file-picker), whose small Java helper
+  receives the picker's answer (a NativeActivity can't); its build script compiles that helper
+  with `javac` and the SDK's `d8`, so the build needs a JDK and build-tools 35+ for JDK 21
+  (`cargo xtask android` picks the newest installed). Below them, and for Save As and Export,
+  PhotoCraft's own browser (`apps/photocraft-android/src/files.rs`) over shared storage. It
   needs Android's "All files access" (`MANAGE_EXTERNAL_STORAGE`; the storage permissions before
   Android 11): the browser's **Allow Access** opens the switch in Settings (else the list of apps,
   else the photos permission; by hand: Settings › Apps › Special app access › All files access).
