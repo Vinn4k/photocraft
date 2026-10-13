@@ -141,11 +141,39 @@ fn every_sheet_opens() {
 fn closing_the_last_document_returns_home() {
     let mut m = editor();
     m.open_sheet(Sheet::Color).unwrap();
-    m.sync(true);
+    m.sync(1);
     assert_eq!(m.route, Route::Editor);
-    m.sync(false);
+    m.sync(0);
     assert_eq!((m.route, m.sheet), (Route::Home, None));
     assert!(m.history.is_empty());
+}
+
+#[test]
+fn a_document_opened_from_home_or_new_document_shows_the_editor() {
+    let mut m = MobileState::default();
+    m.sync(0);
+    m.sync(1);
+    assert_eq!(m.route, Route::Editor, "an open from Home");
+    assert!(m.back());
+    assert_eq!(m.route, Route::Home);
+    m.sync(1);
+    assert_eq!(m.route, Route::Home, "the same documents: Home stays");
+    m.go(Route::NewDocument);
+    m.new_document.insert("name".into(), json!("Poster"));
+    m.sync(2);
+    assert_eq!((m.route, m.history.as_slice()), (Route::Editor, [Route::Home].as_slice()), "Back skips New Document");
+    assert!(m.new_document.is_empty(), "leaving New Document drops its fields");
+}
+
+#[test]
+fn ui_set_edits_the_new_document_fields_on_that_screen_only() {
+    let mut m = MobileState::default();
+    assert!(m.apply(&json!({"newDocument": {"width": 640}}), false).unwrap_err().contains("route newDocument"));
+    assert!(m.apply(&json!({"route": "newDocument", "newDocument": 3}), false).is_err());
+    assert_eq!(m.route, Route::Home, "rejected: nothing applied");
+    m.apply(&json!({"route": "newDocument", "newDocument": {"width": 640, "height": 480}}), false).unwrap();
+    assert_eq!((m.new_document["width"].clone(), m.new_document["height"].clone()), (json!(640), json!(480)));
+    assert_eq!(m.inspect(PORTRAIT)["newDocument"]["width"], 640);
 }
 
 #[test]
@@ -227,6 +255,61 @@ fn a_phone_sized_window_draws_the_router_and_a_desktop_one_does_not() {
     // The desktop default keeps the desktop chrome in a phone-sized window.
     let h = harness(PORTRAIT, LayoutPref::Desktop, true);
     assert!(h.query_by_label("Back").is_none());
+}
+
+#[test]
+fn new_document_creates_the_picked_preset() {
+    let mut h = harness(PORTRAIT, LayoutPref::Auto, false);
+    h.get_by_label("New Document").click();
+    h.run_steps(4);
+    assert_eq!(h.state().ui.mobile.route, Route::NewDocument);
+    assert!(!h.state().ui.mobile.new_document.is_empty(), "the dialog's fields, filled on arrival");
+    h.get_by_label("Web").click();
+    h.run_steps(4);
+    // Small enough for the test renderer's 2048 px textures.
+    h.get_by_label("Web Minimum").click();
+    h.run_steps(4);
+    assert_eq!(h.state().ui.mobile.new_document["width"], json!(1024));
+    h.get_by_label("Create").click();
+    h.run_steps(4);
+    let st = h.state().session.active().expect("Create made a document");
+    assert_eq!((st.doc.size.width, st.doc.size.height), (1024, 768));
+    assert_eq!(h.state().ui.mobile.route, Route::Editor);
+    assert_eq!(h.state().session.presets.recent_documents.first().map(|s| (s.width, s.height)), Some((1024, 768)), "listed under Recent, as the dialog does");
+    h.key_press(egui::Key::BrowserBack);
+    h.run_steps(4);
+    assert_eq!(h.state().ui.mobile.route, Route::Home, "Back from the new document returns Home");
+}
+
+#[test]
+fn new_document_close_returns_home_without_creating() {
+    let mut h = harness(PORTRAIT, LayoutPref::Auto, false);
+    h.get_by_label("New Document").click();
+    h.run_steps(4);
+    h.get_by_label("Close").click();
+    h.run_steps(4);
+    assert_eq!(h.state().ui.mobile.route, Route::Home);
+    assert!(h.state().session.active().is_none());
+    assert!(h.state().ui.mobile.new_document.is_empty());
+}
+
+#[test]
+fn home_lists_recent_files_and_an_unreadable_one_reports_instead_of_opening() {
+    let mut h = egui_kittest::Harness::builder().with_size(PORTRAIT).with_max_steps(64).build_eframe(|cc| {
+        PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.ui.mobile.layout = LayoutPref::Auto;
+        // The list lives in the preferences; `ui.recent_files` mirrors it every frame.
+        app.push_recent("/nonexistent/photocraft-test/poster.psd");
+        app.push_recent("/nonexistent/photocraft-test/moon.png");
+        app
+    });
+    h.run_steps(4);
+    assert!(h.query_by_label("moon.png").is_some());
+    h.get_by_label("poster.psd").click();
+    h.run_steps(4);
+    assert_eq!(h.state().ui.mobile.route, Route::Home, "nothing opened");
+    assert!(h.state().session.active().is_none());
 }
 
 #[test]
