@@ -54,6 +54,13 @@ fn remember(app: &mut PhotocraftApp, f: &Map<String, Value>) {
 }
 
 pub fn open(app: &mut PhotocraftApp) -> Result<u64, String> {
+    let f = fields(app)?;
+    Ok(app.ui.open_dialog(DialogKind::Command, f))
+}
+
+/// File › Export › Export As's fields for the active document, last settings remembered: the
+/// dialog's, and the phone's Export sheet (`mobile`).
+pub fn fields(app: &mut PhotocraftApp) -> Result<Map<String, Value>, String> {
     let st = app.session.active().ok_or("no document")?;
     let mut f = Map::new();
     f.insert("__export".into(), json!(true));
@@ -68,7 +75,7 @@ pub fn open(app: &mut PhotocraftApp) -> Result<u64, String> {
     f.insert("__w".into(), json!(st.doc.size.width));
     f.insert("__h".into(), json!(st.doc.size.height));
     seed_remembered(app, &mut f);
-    Ok(app.ui.open_dialog(DialogKind::Command, f))
+    Ok(f)
 }
 
 /// Layer › Export As…: the same dialog for just the active layer (trimmed to its pixels).

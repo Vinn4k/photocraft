@@ -123,6 +123,14 @@ Android da fase 2).
   barra única com as opções, ferramentas na lateral e o painel aberto (272 dp) ao lado da faixa
   de painéis, recolhendo para a faixa ao fechar. A folha Histórico foi adicionada, como no
   wireframe da barra de painéis.
+- **Folhas** (`mobile/sheets.rs`), cada uma com o painel do desktop: Camadas (abas Camadas /
+  Canais / Demarcadores, as mesmas do dock), Pincel (Configurações do pincel / Pincéis), Curvas
+  (o painel Propriedades de uma camada de ajuste Curvas, não modal; sem ela, um toque cria a
+  camada e a grade de Ajustes fica abaixo), Cor (Cor / Amostras / Degradês / Padrões), Histórico,
+  Menus (pesquisa, os menus do desktop como fichas, submenus, atalhos; um toque executa e fecha) e
+  Exportar (o corpo do Exportar como, inline, com Exportar, Salvar e Salvar como…). No retrato
+  ocupam ~2/3 da altura; na paisagem, o painel lateral. Pincel e Exportar têm a largura fixa do
+  desktop e rolam lateralmente no celular (a adaptar depois).
 - Componentes de toque em `mobile/touch.rs` (alvos de 48 dp, campos de 44 dp).
 - Conferência visual: `cargo run -p photocraft-ui-egui --example snapshot -- --size 412x892
   --layout auto --out phone.png` (sem GPU, use o Vulkan por software: `mesa-vulkan-drivers` e
