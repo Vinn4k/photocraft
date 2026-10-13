@@ -44,6 +44,16 @@ const TOOL_SECTIONS: &[&[&[Tool]]] = &[
     &[&[Tool::Hand, Tool::RotateView], &[Tool::Zoom]],
 ];
 
+/// Every toolbar group (a slot: the tools sharing one button and its flyout), in Photoshop order.
+pub(crate) fn tool_slots() -> impl Iterator<Item = &'static [Tool]> {
+    TOOL_SECTIONS.iter().flat_map(|section| section.iter().copied())
+}
+
+/// The toolbar group whose first tool is `first`.
+pub(crate) fn tool_slot(first: Tool) -> Option<&'static [Tool]> {
+    tool_slots().find(|slot| slot.first() == Some(&first))
+}
+
 /// The tool a slot shows: the current tool if it belongs to the slot, else the last one used.
 fn slot_tool(ui: &egui::Ui, current: Tool, slot: &[Tool], key: egui::Id) -> Tool {
     if slot.contains(&current) {
@@ -901,9 +911,15 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     egui::Panel::top("options_bar")
         .exact_size(options_bar_height(t.pro, narrow))
         .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(10, 0)))
-        .show(ui, |ui| {
-            ui.style_mut().spacing.scroll = egui::style::ScrollStyle { bar_width: 4.0, ..egui::style::ScrollStyle::floating() };
-            egui::ScrollArea::horizontal().id_salt("tool-options").auto_shrink([false, false]).show(ui, |ui| {
+        .show(ui, |ui| options_bar_contents(app, ui));
+}
+
+/// The options bar's controls for the active tool, scrolling sideways when they don't fit: the
+/// desktop's bar under the menus, and the phone editor's bars (`mobile`).
+pub(crate) fn options_bar_contents(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    let t = Tokens::get(ui.ctx());
+    ui.style_mut().spacing.scroll = egui::style::ScrollStyle { bar_width: 4.0, ..egui::style::ScrollStyle::floating() };
+    egui::ScrollArea::horizontal().id_salt("tool-options").auto_shrink([false, false]).show(ui, |ui| {
             // Font ink can extend beyond its advance width at fractional positions.
             // Include its gutter in the container layout, including right-aligned actions.
             egui::Frame::NONE.inner_margin(egui::Margin { right: 2, ..Default::default() }).show(ui, |ui| {
@@ -1473,7 +1489,6 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             reveal_focused_control(ui);
             });
             });
-        });
 }
 
 /// Width of the Layers panel's Opacity and Fill fields, with room for their pop-up slider's ▾.

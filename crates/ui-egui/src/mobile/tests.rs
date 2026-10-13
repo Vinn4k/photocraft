@@ -332,3 +332,128 @@ fn taps_navigate_from_home_to_a_sheet_and_back_key_returns() {
         assert_eq!((h.state().ui.mobile.route, h.state().ui.mobile.sheet), expected);
     }
 }
+
+fn editor_harness(size: egui::Vec2) -> egui_kittest::Harness<'static, PhotocraftApp> {
+    let mut h = harness(size, LayoutPref::Auto, true);
+    // The document was open at launch: the router shows it.
+    assert_eq!(h.state().ui.mobile.route, Route::Editor);
+    h.run_steps(2);
+    h
+}
+
+#[test]
+fn portrait_editor_bars_open_their_sheets() {
+    let mut h = editor_harness(PORTRAIT);
+    for (label, sheet) in [
+        ("Layers", Sheet::Layers),
+        ("Adjustments", Sheet::Curves),
+        ("Properties", Sheet::Brush),
+        ("History", Sheet::History),
+        ("Color", Sheet::Color),
+        ("Menus", Sheet::Menus),
+        ("Export", Sheet::Export),
+        ("Set foreground color", Sheet::Color),
+    ] {
+        h.state_mut().ui.mobile.sheet = None;
+        h.run_steps(2);
+        h.get_by_label(label).click();
+        h.run_steps(4);
+        assert_eq!(h.state().ui.mobile.sheet, Some(sheet), "{label}");
+    }
+    // The open sheet's Close, then Back to Home.
+    h.get_by_label("Close").click();
+    h.run_steps(4);
+    assert_eq!(h.state().ui.mobile.sheet, None);
+    h.get_by_label("Back").click();
+    h.run_steps(4);
+    assert_eq!(h.state().ui.mobile.route, Route::Home);
+    assert!(h.state().session.active().is_some(), "the document stays open");
+}
+
+#[test]
+fn tool_bar_and_all_tools_pick_tools() {
+    let mut h = editor_harness(PORTRAIT);
+    h.get_by_label("Eraser Tool").click();
+    h.run_steps(4);
+    assert_eq!(h.state().ui.tool, crate::state::Tool::Eraser);
+    h.get_by_label("Tools").click();
+    h.run_steps(4);
+    assert!(h.state().ui.mobile.all_tools);
+    h.get_by_label("Gradient Tool").click();
+    h.run_steps(4);
+    assert_eq!(h.state().ui.tool, crate::state::Tool::Gradient);
+    assert!(!h.state().ui.mobile.all_tools, "picking a tool closes the grid");
+}
+
+#[test]
+fn undo_in_the_top_bar_undoes() {
+    let mut h = editor_harness(PORTRAIT);
+    h.state_mut().run("layer.new.layer", json!({})).unwrap();
+    let layers = |h: &egui_kittest::Harness<'static, PhotocraftApp>| h.state().session.active().unwrap().doc.layers.len();
+    assert_eq!(layers(&h), 2);
+    h.run_steps(2);
+    h.get_by_label("Undo").click();
+    h.run_steps(4);
+    assert_eq!(layers(&h), 1);
+    h.get_by_label("Redo").click();
+    h.run_steps(4);
+    assert_eq!(layers(&h), 2);
+}
+
+#[test]
+fn the_brush_rail_leaves_the_brush_alone_until_moved() {
+    let mut h = editor_harness(PORTRAIT);
+    let before = h.state().session.tools.brush.clone();
+    h.run_steps(6);
+    assert_eq!(h.state().session.tools.brush, before, "drawing the rail writes nothing (opacity is 0..1, the rail 1..100%)");
+}
+
+#[test]
+fn landscape_editor_has_a_tool_column_and_a_side_panel() {
+    let mut h = editor_harness(LANDSCAPE);
+    assert!(h.query_by_label("Eraser Tool").is_some(), "tools down the side");
+    h.get_by_label("Layers").click();
+    h.run_steps(4);
+    assert_eq!(h.state().ui.mobile.sheet, Some(Sheet::Layers));
+    h.get_by_label("Close").click();
+    h.run_steps(4);
+    assert_eq!(h.state().ui.mobile.sheet, None, "the panel collapses to its strip");
+}
+
+#[test]
+fn on_screen_keys_toggle_and_ride_on_the_input() {
+    let mut h = editor_harness(PORTRAIT);
+    h.get_by_label("Alt").click();
+    h.run_steps(2);
+    assert!(h.state().ui.mobile.modifiers.alt);
+    let ctx = h.ctx.clone();
+    let tap =
+        egui::Event::PointerButton { pos: egui::pos2(200.0, 400.0), button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE };
+    let mut raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, PORTRAIT)), events: vec![tap.clone()], ..Default::default() };
+    crate::mobile::hold_modifiers(h.state_mut(), &ctx, &mut raw);
+    assert!(matches!(raw.events.first(), Some(egui::Event::ModifiersChanged(m)) if m.alt && !m.shift));
+    assert!(matches!(raw.events.get(1), Some(egui::Event::PointerButton { modifiers, .. }) if modifiers.alt), "the tap is an Alt-click");
+    // Released: the next frame takes Alt off again.
+    h.get_by_label("Alt").click();
+    h.run_steps(2);
+    let mut raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, PORTRAIT)), events: vec![tap], ..Default::default() };
+    crate::mobile::hold_modifiers(h.state_mut(), &ctx, &mut raw);
+    assert!(matches!(raw.events.first(), Some(egui::Event::ModifiersChanged(m)) if !m.alt));
+    assert!(matches!(raw.events.get(1), Some(egui::Event::PointerButton { modifiers, .. }) if !modifiers.alt));
+    // Leaving the editor drops held keys.
+    h.state_mut().ui.mobile.modifiers.shift = true;
+    h.state_mut().ui.mobile.go(Route::Home);
+    h.run_steps(2);
+    assert!(!h.state().ui.mobile.modifiers.any());
+}
+
+#[test]
+fn ui_set_holds_the_on_screen_keys() {
+    let mut m = editor();
+    m.apply(&json!({"modifiers": {"shift": true, "ctrl": true}}), true).unwrap();
+    assert_eq!(m.modifiers, Modifiers { shift: true, alt: false, ctrl: true });
+    for bad in [json!({"modifiers": {"meta": true}}), json!({"modifiers": {"shift": 1}}), json!({"modifiers": true})] {
+        assert!(m.apply(&bad, true).is_err(), "{bad}");
+    }
+    assert_eq!(m.inspect(PORTRAIT)["modifiers"]["shift"], true);
+}
