@@ -14,6 +14,9 @@ tomadas para levar o PhotoCraft ao Android e serve de ponto de partida para qual
 | Casca nativa | Mínima: `android-activity` (NativeActivity/GameActivity) + Gradle; Kotlin só onde o Android exigir (seletor de arquivos/SAF, compartilhar) |
 | Entrada | **Caneta pinta, dedo navega** (pan/zoom/rotação com dois dedos) |
 | Repositório | Fork `Vinn4k/photocraft`; trabalho na branch `android-mobile` |
+| Orientação | **Retrato** é o layout principal; **paisagem** é variante desenhada (decidido em 13/10/2026) |
+| Visual | **Tema atual** (Pro, cinza médio por padrão), com os tokens de `theme.rs`; sem identidade própria |
+| Entrega dos desenhos | **Página interativa** no tamanho do S26 Ultra (canvas de wireframes navegável) |
 
 Restrições do projeto que continuam valendo (ver `AGENTS.md`): só Rust, sem Tauri/Electron/webview,
 nada abaixo de `ui-egui` depende de egui/eframe/winit, `unsafe` só em crate isolado (como
@@ -33,7 +36,8 @@ nada abaixo de `ui-egui` depende de egui/eframe/winit, `unsafe` só em crate iso
 
 ## Fases
 
-1. **Desenho das telas** (atual): wireframes das telas principais para o S26 Ultra.
+1. **Desenho das telas** (entregue para revisão em 13/10/2026): wireframes das telas principais para
+   o S26 Ultra; ver *Wireframes* abaixo. Aprovados os desenhos, segue a fase 2.
 2. **Build Android mínimo:** novo app `apps/photocraft-android` (cdylib + `android-activity`),
    abrindo o editor atual sem mudanças de layout; empacotar APK (cargo-ndk / xbuild) e documentar
    em `docs/development.md`.
@@ -62,11 +66,32 @@ Diretrizes para o desenho: alvos de toque de no mínimo 44–48 dp; um painel po
 manter a lógica e os nomes do Photoshop (o objetivo do projeto é paridade 1:1); usar os tokens de
 `docs/ui-design.md`.
 
-## Perguntas em aberto
+## Wireframes (fase 1)
 
-- Orientação principal: retrato ou paisagem? (proposta: retrato principal, paisagem como variante)
-- Visual: manter o tema escuro atual ou criar uma identidade própria para o mobile? (proposta: tema atual)
-- Formato da entrega dos desenhos: página interativa no tamanho do S26 Ultra (proposta) ou documento.
+Canvas interativo, privado (compartilhe pelo menu Share da página para outras pessoas abrirem):
+https://claude.ai/artifact/KjsfimDyrPbUVdWDtCnu81. As telas são ligadas entre si (botão Play em cada
+prancheta). Medidas em dp: retrato 412 × 892, paisagem 892 × 412 (19,5:9). Cores do tema Pro (cinza
+médio): chrome/cards `#535353`, dock `#424242`, campos `#454545`, borda `#686868`, linha selecionada
+`#6B6B6B`, tela de pintura `#282828`, destaque `#378EF0`; textos `#EEEEEE`/`#D4D4D4`. Inter na
+interface e JetBrains Mono nos números, como no desktop. Textos do catálogo `i18n/pt-br.tsv`.
+
+| # | Tela | Decisões |
+|---|---|---|
+| 1 | Início / Galeria | Novo documento e Abrir… em destaque; Recentes em grade de 2 colunas com tamanho, modo e data; Abrir usa o seletor do Android (SAF) |
+| 2 | Novo documento | Abas de categoria do Photoshop (Recentes, Foto, Imprimir, Arte e ilustração, Web); predefinições em grade de 3; detalhes: nome, largura, altura, unidade, resolução, modo de cor, profundidade, conteúdo do plano de fundo; Criar no topo |
+| 3 | Editor em retrato | Barra superior (voltar, nome e "33,3% (Camada 1, RGB/8)", desfazer, refazer, exportar, menus); barra de opções da ferramenta com rolagem; tela de pintura em tela cheia; modificadores **Shift / Alt / Ctrl** flutuantes à esquerda (alternam, como teclas presas); trilho de Tamanho/Opacidade à direita; barra de ferramentas inferior com cores de 1º plano/fundo, 6 ferramentas (triângulo de grupo) e "todas as ferramentas"; barra de painéis: Camadas, Ajustes, Propriedades, Histórico, Cor |
+| 4 | Editor em paisagem | Barra única com opções da ferramenta; ferramentas na lateral esquerda; painel à direita (272 dp) recolhível, com faixa de ícones de painéis |
+| 5 | Camadas | Folha inferior (~2/3 da altura) com abas Camadas / Canais / Demarcadores, modo de mesclagem, Opacidade, Bloquear, Preenchimento, linhas de 60 dp com miniatura e máscara, e as ações do rodapé do Photoshop (fx, máscara, ajuste, grupo, nova, excluir) |
+| 6a | Propriedades do pincel | Folha com predefinições, prévia do traço, Tamanho, Dureza, Suavização; seção S Pen: pressão → tamanho/opacidade, inclinação → ângulo, botão lateral (segurar) → ferramenta temporária |
+| 6b | Ajustes: Curvas | Folha não modal (a imagem continua visível e atualiza ao vivo): predefinição, canal, Automático, ferramentas (ajuste na imagem, pontos preto/cinza/branco, desenhar), gráfico 300 dp com histograma, Entrada/Saída, rodapé do painel Propriedades |
+| 7 | Seletor de cor | Tela cheia, como o diálogo modal do desktop: campo S/B, faixa de matiz, novo/atual, H S B / R G B / hex, conta-gotas, bibliotecas, Somente cores da Web, Amostras |
+| 8 | Menus | Folha com pesquisa de comandos, os 11 menus do desktop como fichas e a lista do menu escolhido (mesma ordem, separadores, submenus e atalhos, mostrados para teclado físico/DeX) |
+| 9 | Salvar e exportar | Exportar como: prévia, formato (PSD, PNG, JPG, Mais), qualidade, tamanho, escala, sRGB, perfil, metadados, tamanho estimado; Compartilhar e Salvar em… (SAF) |
+
+Gestos (fase 4): a caneta pinta e usa a ferramenta ativa; o dedo nunca pinta: um dedo arrasta a vista,
+dois dedos fazem pan/zoom/rotação; toque com dois dedos desfaz, com três refaz; pressionar
+longo numa camada abre o menu de contexto dela. Um painel por vez no celular; alvos de toque ≥ 48 dp
+(44 dp só em linhas densas do painel em paisagem).
 
 ## Mensagem inicial para uma sessão nova
 
