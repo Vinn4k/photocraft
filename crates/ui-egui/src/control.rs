@@ -8,8 +8,10 @@
 //! - `engine.commands`: list commands with enablement
 //! - `ui.inspect`: full UI state (tool, panels, views, dialogs, windows, window size); the menu
 //!   tree is `ui.menu.list`
-//! - `ui.set {tool?, panels?, dock?, dockTabs?, dockWidth?, colorPanel?, maskTarget?, vectorMaskTarget?, selectionMode?, zoom?, center?, rotation?, fit?, theme?, brushSection?, brushTab?, brushesView?, brushPicker?, brushPickerName?, brushPickerStroke?, brushPickerTip?, brushPickerScale?, brushSize?}`:
-//!   change UI state; any other field is an error ([`UI_SET_FIELDS`])
+//! - `ui.set {tool?, mobile?, panels?, dock?, dockTabs?, dockWidth?, colorPanel?, maskTarget?, vectorMaskTarget?, selectionMode?, zoom?, center?, rotation?, fit?, theme?, brushSection?, brushTab?, brushesView?, brushPicker?, brushPickerName?, brushPickerStroke?, brushPickerTip?, brushPickerScale?, brushSize?}`:
+//!   change UI state; any other field is an error ([`UI_SET_FIELDS`]).
+//!   `mobile {layout?: auto|desktop|phone, route?: home|newDocument|editor, sheet?: layers|brush|curves|color|menus|export|null, back?: true}`
+//!   drives the phone layout ([`crate::mobile`]); `ui.inspect` reports it as `mobile`
 //! - `ui.dialog.open {kind, fields?}` (kinds: newDocument, about, layerStyle {effect?}, colorPicker {target: foreground|background}, command {command}) / `ui.dialog.set {dialog, field, value}` / `ui.dialog.confirm {dialog, wait?}` / `ui.dialog.cancel {dialog}`
 //! - `ui.dialog.apply {dialog}`: commit Preferences changes without closing the dialog
 //! - `ui.window.open {document?}` / `ui.window.close {window}`: extra document windows
@@ -131,8 +133,9 @@ pub enum Outcome {
 /// field's value is validated before the first one is applied, so a typo, an unknown field, a
 /// bad value or a bad nested key can't reply with success while nothing — or only half of it —
 /// changed (#412).
-pub const UI_SET_FIELDS: [&str; 35] = [
+pub const UI_SET_FIELDS: [&str; 36] = [
     "tool",
+    "mobile",
     "panels",
     "dock",
     "dockTabs",
@@ -629,6 +632,16 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                     None => None,
                 };
 
+                // The phone layout's route and sheet (`mobile`): checked on a copy, swapped in below.
+                let mobile = match p.get("mobile") {
+                    Some(v) => {
+                        let mut next = app.ui.mobile.clone();
+                        next.apply(v, app.session.active().is_some())?;
+                        Some(next)
+                    }
+                    None => None,
+                };
+
                 let bridge_pro = matches!(theme.unwrap_or(app.ui.theme), crate::theme::ThemeKind::Pro | crate::theme::ThemeKind::ProMedium);
                 let legacy_update = crate::panel_docking::prepare_legacy_update(app, p, panels.as_ref(), dock_tabs.as_ref(), dock.as_ref(), bridge_pro)?;
 
@@ -769,6 +782,9 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                 // Which chip the Color panel edits.
                 if let Some(c) = color_panel {
                     app.ui.color_panel = c;
+                }
+                if let Some(m) = mobile {
+                    app.ui.mobile = m;
                 }
                 if let Some(size) = brush_size {
                     app.run("tools.setBrush", json!({"brush": {"size": size}})).map_err(|e| e.to_string())?;
@@ -1245,6 +1261,7 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
     json!({
         "window": {"width": screen.width(), "height": screen.height(), "pixelsPerPoint": ctx.pixels_per_point()},
         "tool": app.ui.tool,
+        "mobile": app.ui.mobile.inspect(screen.size()),
         "toolOptions": app.ui.tool_options,
         "perspectiveCrop": app.ui.perspective_crop,
         "strokeEditor": app.ui.stroke_editor,
