@@ -11,3 +11,6 @@ target/
 /craft-fonts
 *.log
 __pycache__/
+
+# Launcher icons copied by `cargo xtask android` (from assets/app-icon).
+/apps/photocraft-android/res/

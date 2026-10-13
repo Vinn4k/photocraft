@@ -1,0 +1,62 @@
+# Android: build the test APK (apps/photocraft-android) with `cargo xtask android` and attach it to
+# the run as an artifact, to download and install on a phone. Signed with a debug key: fine for
+# testing, not for a store.
+name: Android APK
+
+on:
+  push:
+    branches: [android-mobile]
+  pull_request:
+    paths:
+      - .github/workflows/android.yml
+      - apps/photocraft-android/**
+      - crates/ui-egui/**
+      - xtask/src/android.rs
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      # The runner image ships the SDK (ANDROID_HOME); add what the build needs.
+      - name: Android SDK packages
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0" "ndk;27.2.12479018"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - name: cargo-apk
+        run: cargo install cargo-apk --locked
+      - name: Toolchain check
+        run: cargo xtask android --doctor
+      - name: Build APK
+        run: cargo xtask android
+      - name: Name the APK after the commit
+        run: cp target/release/apk/photocraft.apk "photocraft-${GITHUB_SHA::7}.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: photocraft-android-apk
+          path: photocraft-*.apk
+          retention-days: 30

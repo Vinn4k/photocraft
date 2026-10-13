@@ -38,9 +38,11 @@ nada abaixo de `ui-egui` depende de egui/eframe/winit, `unsafe` só em crate iso
 
 1. **Desenho das telas** (entregue para revisão em 13/10/2026): wireframes das telas principais para
    o S26 Ultra; ver *Wireframes* abaixo. Aprovados os desenhos, segue a fase 2.
-2. **Build Android mínimo:** novo app `apps/photocraft-android` (cdylib + `android-activity`),
-   abrindo o editor atual sem mudanças de layout; empacotar APK (cargo-ndk / xbuild) e documentar
-   em `docs/development.md`.
+2. **Build Android mínimo** (13/10/2026): `apps/photocraft-android` (cdylib + `android-activity`,
+   NativeActivity, wgpu/Vulkan), empacotado com cargo-apk por `cargo xtask android` (`--run`
+   instala e abre via adb) e pelo workflow *Android APK* (artefato `photocraft-android-apk`).
+   Instruções em `docs/development.md` › Android build. Salvar/Exportar gravam em
+   `Android/data/ai.storyteller.photocraft/files/`; Abrir aguarda o seletor do sistema (fase 5).
 3. **Layout adaptativo em `ui-egui`:** modo de layout escolhido pelo tamanho da tela
    (desktop / tablet / celular), sem quebrar o desktop.
 4. **Entrada por toque e S Pen:** gestos, separação caneta × dedo, pressão/inclinação da S Pen via
