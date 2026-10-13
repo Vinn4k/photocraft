@@ -15,6 +15,7 @@ use crate::PhotocraftApp;
 mod editor;
 mod home;
 mod new_document;
+mod sheets;
 #[cfg(test)]
 mod tests;
 pub mod touch;
@@ -190,6 +191,15 @@ impl Sheet {
     }
 }
 
+/// Where the Menus sheet is.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MenusState {
+    /// The open menu: `["Image", "Adjustments"]`; empty for the first menu.
+    pub path: Vec<String>,
+    pub search: String,
+}
+
 /// The on-screen modifier keys: each stays down until tapped again, like a held key.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -268,6 +278,10 @@ pub struct MobileState {
     pub modifiers: Modifiers,
     /// The editor's All Tools grid is open.
     pub all_tools: bool,
+    /// The Menus sheet: the open menu (path from the menu bar down) and the search.
+    pub menus: MenusState,
+    /// The Export sheet's fields, as the Export As dialog's: filled when it opens.
+    pub export: serde_json::Map<String, Value>,
     /// The keys `hold_modifiers` added to the input last frame.
     #[serde(skip)]
     pub applied_modifiers: Modifiers,
@@ -363,6 +377,10 @@ impl MobileState {
         if self.route != Route::Editor {
             self.modifiers = Modifiers::default();
             self.all_tools = false;
+        }
+        // Export As starts from the document's size and the remembered settings each time.
+        if self.sheet != Some(Sheet::Export) {
+            self.export.clear();
         }
     }
 
@@ -524,4 +542,5 @@ pub(super) fn sheet_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, t: &crate::
             }
         });
     });
+    sheets::body(app, ui, t, sheet);
 }

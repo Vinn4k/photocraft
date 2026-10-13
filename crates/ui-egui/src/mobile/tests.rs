@@ -457,3 +457,92 @@ fn ui_set_holds_the_on_screen_keys() {
     }
     assert_eq!(m.inspect(PORTRAIT)["modifiers"]["shift"], true);
 }
+
+/// The highest of the buttons labelled `label` (a sheet's, above the editor's bars).
+fn topmost<'a>(h: &'a egui_kittest::Harness<'static, PhotocraftApp>, label: &'a str) -> egui_kittest::Node<'a> {
+    h.query_all_by_role_and_label(egui::accesskit::Role::Button, label)
+        .min_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
+        .unwrap_or_else(|| panic!("no {label}"))
+}
+
+#[test]
+fn every_sheet_draws_its_panel_in_both_orientations() {
+    for size in [PORTRAIT, LANDSCAPE] {
+        let mut h = editor_harness(size);
+        for (sheet, shows) in [
+            (Sheet::Layers, "Channels"),
+            (Sheet::Brush, "Brushes"),
+            (Sheet::Color, "Swatches"),
+            (Sheet::Menus, "Window"),
+            (Sheet::Export, "Save As…"),
+            (Sheet::History, "History"),
+            (Sheet::Curves, "Curves"),
+        ] {
+            h.state_mut().ui.mobile.sheet = Some(sheet);
+            h.run_steps(4);
+            assert!(h.query_all_by_label(shows).next().is_some(), "{size:?} {sheet:?}: {shows}");
+        }
+    }
+}
+
+#[test]
+fn layers_sheet_tabs_are_the_docks() {
+    let mut h = editor_harness(PORTRAIT);
+    h.state_mut().ui.mobile.sheet = Some(Sheet::Layers);
+    h.run_steps(4);
+    h.get_by_label("Channels").click();
+    h.run_steps(4);
+    assert_eq!(h.state().ui.dock_tabs.layers, 1, "the dock's tab: the desktop opens on it too");
+}
+
+#[test]
+fn curves_sheet_adds_a_curves_layer_and_shows_its_properties() {
+    let mut h = editor_harness(PORTRAIT);
+    h.state_mut().ui.mobile.sheet = Some(Sheet::Curves);
+    h.run_steps(4);
+    // The card, above the adjustments grid's own Curves button.
+    topmost(&h, "Curves").click();
+    h.run_steps(6);
+    let st = h.state().session.active().unwrap();
+    let layer = st.active_layer.and_then(|id| st.doc.layer(id)).expect("an active layer");
+    assert!(matches!(&layer.content, photocraft_doc::LayerContent::Adjustment(photocraft_doc::Adjustment::Curves { .. })), "a Curves adjustment layer");
+    assert_eq!(h.state().ui.mobile.sheet, Some(Sheet::Curves), "non-modal: the sheet stays, now on its properties");
+}
+
+#[test]
+fn menus_sheet_opens_submenus_and_runs_items() {
+    let mut h = editor_harness(PORTRAIT);
+    h.state_mut().ui.mobile.sheet = Some(Sheet::Menus);
+    h.state_mut().ui.mobile.menus.path = vec!["Image".into()];
+    h.run_steps(4);
+    // The menu row, above the panel bar's Adjustments.
+    topmost(&h, "Adjustments").click();
+    h.run_steps(4);
+    assert_eq!(h.state().ui.mobile.menus.path, ["Image", "Adjustments"]);
+    h.get_by_label("‹ Adjustments").click();
+    h.run_steps(4);
+    assert_eq!(h.state().ui.mobile.menus.path, ["Image"]);
+    // Search finds Select › All anywhere; a tap runs it and closes the sheet.
+    h.state_mut().ui.mobile.menus.search = "deselect".into();
+    h.run_steps(4);
+    assert!(h.query_by_label("Select All").is_none());
+    h.state_mut().ui.mobile.menus.search.clear();
+    h.state_mut().ui.mobile.menus.path = vec!["Select".into()];
+    h.run_steps(4);
+    h.get_by_label("All").click();
+    h.run_steps(4);
+    assert!(h.state().session.active().unwrap().doc.selection.is_some(), "Select › All ran");
+    assert_eq!(h.state().ui.mobile.sheet, None);
+}
+
+#[test]
+fn export_sheet_holds_export_as_fields_while_open() {
+    let mut h = editor_harness(PORTRAIT);
+    h.state_mut().ui.mobile.sheet = Some(Sheet::Export);
+    h.run_steps(4);
+    assert_eq!(h.state().ui.mobile.export.get("format"), Some(&json!("png")), "the Export As dialog's fields");
+    assert_eq!(h.state().ui.mobile.export.get("__w"), Some(&json!(64)));
+    h.get_by_label("Close").click();
+    h.run_steps(4);
+    assert!(h.state().ui.mobile.export.is_empty(), "dropped when the sheet closes");
+}
